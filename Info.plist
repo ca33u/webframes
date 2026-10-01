@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Web Frames</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+    <key>NSPrincipalClass</key>
+    <string>WebFramesApplication</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 Egor Sazanov</string>
+
+    <key>SUFeedURL</key>
+    <string>https://www.webframes.pro/updates/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>qYJAvzHWCLBRJm+Q7YUzG6JtGIq3cnGgAzclxBlJ7Co=</string>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUSendProfileInfo</key>
+    <false/>
+
+    <!-- Document types this app handles. Binds the .webframes extension to
+         our custom UTI and wires open-with-… into NSDocumentController. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Web Frames Project</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <!-- Matches the @objc(WebFramesDocument) annotation on the
+                 Swift class — avoids depending on PRODUCT_MODULE_NAME,
+                 which here sanitizes to "Web_Frames". -->
+            <key>NSDocumentClass</key>
+            <string>WebFramesDocument</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>app.essazanov.webframes.document</string>
+            </array>
+            <key>LSTypeIsPackage</key>
+            <true/>
+        </dict>
+    </array>
+
+    <!-- Export our UTI so Launch Services / Finder knows about .webframes. -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>app.essazanov.webframes.document</string>
+            <key>UTTypeDescription</key>
+            <string>Web Frames Project</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>com.apple.package</string>
+                <string>public.composite-content</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>webframes</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>

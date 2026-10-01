@@ -1,0 +1,9 @@
+{
+  "name": "@webframes/tools",
+  "private": true,
+  "type": "module",
+  "description": "Node helpers bundled into Web Frames (Codex bridge, comments MCP).",
+  "scripts": {
+    "test": "node --test bridge.test.mjs comments-mcp.test.mjs comments-mutations.test.mjs && npm --prefix component-catalog test"
+  }
+}

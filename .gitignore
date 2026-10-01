@@ -1,0 +1,22 @@
+
+# Local Codex pairing token and source/evidence snapshots
+.codex-bridge/
+
+Tools/runtime-dist/
+
+/release/
+
+# Installed by Tools/prepare_runtime.py (npm ci); regenerated, not tracked
+Tools/component-catalog/node_modules/
+
+# Xcode / macOS / Python noise
+xcuserdata/
+*.xcuserstate
+.DS_Store
+__pycache__/
+*.pyc
+DerivedData/
+build/
+
+# Local agent settings with machine-specific paths
+.claude/settings.local.json
