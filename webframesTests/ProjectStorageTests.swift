@@ -234,6 +234,9 @@ struct ProjectStorageTests {
         let elapsed = Date().timeIntervalSince(start)
         #expect(Set(written.map(\.lastPathComponent)).isSubset(of: Set(entries.map(\.url.lastPathComponent))))
         #expect(entries.contains { $0.displayName == "Big 7" })
-        #expect(elapsed < 0.1, "listProjects took \(elapsed)s")
+        // Reading the header line takes ~0.05 s here; parsing the 100 MB of
+        // JSON took seconds. 0.25 s keeps that margin without failing on a
+        // busy machine or CI runner.
+        #expect(elapsed < 0.25, "listProjects took \(elapsed)s")
     }
 }
