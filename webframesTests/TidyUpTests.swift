@@ -15,18 +15,28 @@ struct TidyUpTests {
 
     @Test func scatteredFramesBecomeAnEvenGridWithoutOverlaps() {
         // A messy cloud of 12 phone screenshots, wider than tall.
-        let frames = (0..<12).map { i in frame("f\(i)", CGFloat((i * 733) % 4000), CGFloat((i * 491) % 1500)) }
+        var frames: [FrameModel] = []
+        for i in 0..<12 {
+            let x = CGFloat((i * 733) % 4000)
+            let y = CGFloat((i * 491) % 1500)
+            frames.append(frame("f\(i)", x, y))
+        }
         let positions = FrameArrangement.tidyUp.positions(for: frames)
         #expect(positions.count == 12)
-        let r = rects(frames, positions)
+        let r: [CGRect] = rects(frames, positions)
         for i in r.indices { for j in r.indices where i < j { #expect(!r[i].intersects(r[j])) } }
         // Equal gaps: the distinct x origins step by the same amount.
-        let xs = Set(r.map(\.minX)).sorted()
-        let steps = Set(zip(xs, xs.dropFirst()).map { $1 - $0 })
+        let minXs: [CGFloat] = r.map { (rect: CGRect) -> CGFloat in rect.minX }
+        let minYs: [CGFloat] = r.map { (rect: CGRect) -> CGFloat in rect.minY }
+        let xs: [CGFloat] = Set(minXs).sorted()
+        var steps = Set<CGFloat>()
+        for k in xs.indices.dropFirst() { steps.insert(xs[k] - xs[k - 1]) }
         #expect(steps.count == 1)
         // Starts at the selection's top-left corner.
-        #expect(r.map(\.minX).min() == frames.map(\.x).min())
-        #expect(r.map(\.minY).min() == frames.map(\.y).min())
+        let frameXs: [CGFloat] = frames.map { (f: FrameModel) -> CGFloat in f.x }
+        let frameYs: [CGFloat] = frames.map { (f: FrameModel) -> CGFloat in f.y }
+        #expect(minXs.min() == frameXs.min())
+        #expect(minYs.min() == frameYs.min())
     }
 
     @Test func keepsReadingOrderOfAnExistingRow() {
