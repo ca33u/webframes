@@ -174,6 +174,17 @@ final class FrameCardView: NSView {
     private let resizeCorner = ResizeGripView(mode: "corner")
     private let resizeBar    = ResizeGripView(mode: "bottom")
 
+    /// Toolbar, link handles and resize grips. They live in this sibling of
+    /// the card, kept above every card by `FrameLayerView`, so a frame's
+    /// controls are never covered by another frame. It uses the card's own
+    /// coordinates (bounds origin −pad) and is shown only while the frame
+    /// is hovered (and on top under the pointer), selected or a link drop
+    /// target — so controls of a covered frame do not show through or take
+    /// clicks meant for the frame above.
+    let chromeHost = CardChromeHostView()
+    private static let chromePad: CGFloat = 96
+    private var chromeShown = false
+
     // MARK: Init
 
     init(id: String, container: FrameContainer) {
@@ -207,19 +218,18 @@ final class FrameCardView: NSView {
         addSubview(container)
         addSubview(headerView, positioned: .above, relativeTo: container)
 
-        addSubview(leftHandle)
-        addSubview(rightHandle)
-        addSubview(topHandle)
-        addSubview(bottomHandle)
-        addSubview(resizeCorner)
-        addSubview(resizeBar)
+        for v in [leftHandle, rightHandle, topHandle, bottomHandle, resizeCorner, resizeBar] as [NSView] {
+            chromeHost.addSubview(v)
+        }
+        chromeHost.isHidden = true
+        chromeHost.alphaValue = 0
+        chromeHost.card = self
 
         // Toolbar floats ABOVE the card (in flipped coords, negative y).
         // Start hidden — hover/selection drives visibility via
         // `syncToolbarVisibility`.
-        toolbar.alphaValue = 0
         toolbar.onHoverChanged = { [weak self] in self?.syncToolbarVisibility() }
-        addSubview(toolbar)
+        chromeHost.addSubview(toolbar)
 
         // Wire delegate pass-through: each inner view emits via our shared
         // closure, which forwards up to the card's delegate.
@@ -542,6 +552,48 @@ final class FrameCardView: NSView {
         }
     }
 
+    // MARK: Chrome host placement
+
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
+        placeChromeHost()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        placeChromeHost()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        guard let parent = superview else {
+            chromeHost.removeFromSuperview()
+            return
+        }
+        if chromeHost.superview !== parent {
+            parent.addSubview(chromeHost, positioned: .above, relativeTo: nil)
+        }
+        placeChromeHost()
+    }
+
+    override var isHidden: Bool { didSet { syncToolbarVisibility() } }
+
+    private func placeChromeHost() {
+        let pad = Self.chromePad
+        let rect = frame.insetBy(dx: -pad, dy: -pad)
+        if chromeHost.frame != rect { chromeHost.frame = rect }
+        let bounds = NSRect(x: -pad, y: -pad, width: rect.width, height: rect.height)
+        if chromeHost.bounds != bounds { chromeHost.bounds = bounds }
+    }
+
+    /// The pointer is over this card and not over a card stacked above it.
+    private var isTopmostUnderPointer: Bool {
+        guard let window, let root = window.contentView else { return false }
+        let point = root.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard let hit = root.hitTest(root.superview.map { root.convert(point, to: $0) } ?? point) else { return false }
+        return hit === self || hit.isDescendant(of: self) || hit.isDescendant(of: chromeHost)
+    }
+
     // MARK: Hover → toolbar visibility
 
     override func updateTrackingAreas() {
@@ -563,28 +615,51 @@ final class FrameCardView: NSView {
         )
         let t = NSTrackingArea(
             rect: rect,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow],
             owner: self, userInfo: nil
         )
         addTrackingArea(t)
         cardTracking = t
     }
 
-    override func mouseEntered(with event: NSEvent) { hoveringCard = true }
+    override func mouseEntered(with event: NSEvent) { hoveringCard = isTopmostUnderPointer }
     override func mouseExited(with event: NSEvent)  { hoveringCard = false }
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let top = isTopmostUnderPointer
+        if top != hoveringCard { hoveringCard = top }
+    }
+
+    /// Selected, a link drop target, hovered on top, or the pointer is in
+    /// the controls themselves.
+    private var wantsChrome: Bool {
+        guard !isHidden, alphaValue > 0.5 else { return false }
+        return chrome?.selected == true || chrome?.dropTarget == true || hoveringCard || toolbar.isHovering
+    }
+
+    private func setChromeShown(_ shown: Bool) {
+        guard shown != chromeShown else { return }
+        chromeShown = shown
+        if shown { chromeHost.isHidden = false }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            chromeHost.animator().alphaValue = shown ? 1 : 0
+        }, completionHandler: { [weak self] in
+            // Hidden controls must not take clicks meant for frames below.
+            guard let self, !self.chromeShown else { return }
+            self.chromeHost.isHidden = true
+        })
+    }
 
     private func syncToolbarVisibility() {
-        let visible = (chrome?.selected == true) || hoveringCard || toolbar.isHovering
         hideDebounceTimer?.invalidate()
         hideDebounceTimer = nil
-        if visible {
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.18
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                toolbar.animator().alphaValue = 1
-            }
+        if wantsChrome {
+            setChromeShown(true)
             return
         }
+        guard chromeShown else { return }
         // Grace period: give the cursor ~320ms to cross the 8pt gap into
         // the toolbar. If any hover flag flips back to true in that window,
         // `syncToolbarVisibility` runs again and cancels this timer.
@@ -593,16 +668,31 @@ final class FrameCardView: NSView {
             // Re-check state at fire time — the tracking areas may have
             // flipped back to hovering without triggering syncToolbar
             // (e.g., fast pointer through the gap into the pill).
-            let stillHidden = !(self.chrome?.selected == true
-                || self.hoveringCard
-                || self.toolbar.isHovering)
-            guard stillHidden else { return }
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.18
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                self.toolbar.animator().alphaValue = 0
-            }
+            guard !self.wantsChrome else { return }
+            // Keep the controls while a resize or link drag is in progress.
+            if NSEvent.pressedMouseButtons & 1 != 0 { self.syncToolbarVisibility(); return }
+            self.setChromeShown(false)
         }
+    }
+}
+
+// MARK: - Chrome host
+
+/// Sibling of a `FrameCardView` holding its floating controls. Empty space
+/// passes clicks through; see `FrameCardView.chromeHost`.
+final class CardChromeHostView: NSView {
+    /// Unhandled events and keys from the controls go to their card (the
+    /// view parent is the frame layer), as when they were card subviews.
+    weak var card: NSView?
+    override var nextResponder: NSResponder? {
+        get { card ?? super.nextResponder }
+        set { super.nextResponder = newValue }
+    }
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0.05 else { return nil }
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
     }
 }
 

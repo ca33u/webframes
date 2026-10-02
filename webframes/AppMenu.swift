@@ -152,7 +152,7 @@ enum AppMenu {
         mainMenu.addItem(arrangeItem)
         let arrangeMenu = NSMenu(title: "Arrange")
         for (index, action) in FrameArrangement.allCases.enumerated() {
-            if index == 3 || index == 6 { arrangeMenu.addItem(.separator()) }
+            if FrameArrangement.groupStarts.contains(index) { arrangeMenu.addItem(.separator()) }
             let item = NSMenuItem(title: action.rawValue,
                                   action: #selector(DocumentWindowController.arrangeFrames(_:)),
                                   keyEquivalent: action.keyEquivalent)

@@ -2509,7 +2509,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     private func updateArrangementBar() {
         if arrangementBar.superview == nil {
             for (index, action) in FrameArrangement.allCases.enumerated() {
-                if index == 3 { arrangementBar.addArrangedSubview(Self.arrangementSeparator()) }
+                if index == 3 || index == 8 { arrangementBar.addArrangedSubview(Self.arrangementSeparator()) }
                 if index == 6 { arrangementBar.addArrangedSubview(distributeSeparator) }
                 let image = NSImage(systemSymbolName: action.symbolName, accessibilityDescription: action.rawValue)
                     ?? NSImage(systemSymbolName: "square.dashed", accessibilityDescription: action.rawValue)!
@@ -2552,7 +2552,14 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         return line
     }
     func isArrangementBarRegion(_ point: CGPoint) -> Bool { !arrangementBar.isHidden && arrangementBar.superview != nil && arrangementBar.frame.contains(point) }
-    func canArrange(_ action: FrameArrangement) -> Bool { selectedFrameIDs.count >= action.minimumSelection }
+    func canArrange(_ action: FrameArrangement) -> Bool { arrangementTargets(action).count >= action.minimumSelection }
+    /// Frames an action applies to: the selection, or for Tidy Up with
+    /// fewer than two selected, the whole board.
+    private func arrangementTargets(_ action: FrameArrangement) -> [FrameModel] {
+        guard let frames = document?.workspace.frames else { return [] }
+        let selected = frames.filter { selectedFrameIDs.contains($0.id) }
+        return action == .tidyUp && selected.count < 2 ? frames : selected
+    }
     @objc private func arrangeFromToolbar(_ sender: NSButton) {
         guard FrameArrangement.allCases.indices.contains(sender.tag) else { return }
         arrangeSelection(FrameArrangement.allCases[sender.tag])
@@ -2573,8 +2580,8 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
 
     /// Aligns or distributes the selected frames as one undo step.
     func arrangeSelection(_ action: FrameArrangement) {
-        guard canArrange(action), let workspace = document?.workspace else { return }
-        moveSelection(to: action.positions(for: workspace.frames.filter { selectedFrameIDs.contains($0.id) }), action: action.rawValue)
+        guard canArrange(action) else { return }
+        moveSelection(to: action.positions(for: arrangementTargets(action)), action: action.rawValue)
     }
     private func moveSelection(to positions: [String: CGPoint], action: String) {
         guard let document, !positions.isEmpty else { return }
@@ -3566,6 +3573,25 @@ extension CanvasHost {
 
 final class FrameLayerView: NSView {
     override var isFlipped: Bool { true }
+    /// Card controls (`CardChromeHostView`) stay above every card: adding
+    /// or reordering a card would otherwise put it over other cards'
+    /// toolbars and handles.
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        if subview is FrameCardView { raiseCardControls() }
+    }
+    /// Reordering an existing card (layer order) goes through here without
+    /// `didAddSubview`.
+    override func addSubview(_ view: NSView, positioned place: NSWindow.OrderingMode, relativeTo otherView: NSView?) {
+        super.addSubview(view, positioned: place, relativeTo: otherView)
+        if view is FrameCardView { raiseCardControls() }
+    }
+    private func raiseCardControls() {
+        let hosts = subviews.filter { $0 is CardChromeHostView }
+        guard let lastCard = subviews.lastIndex(where: { $0 is FrameCardView }),
+              hosts.contains(where: { subviews.firstIndex(of: $0)! < lastCard }) else { return }
+        for host in hosts { super.addSubview(host, positioned: .above, relativeTo: nil) }
+    }
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
         return hit === self ? nil : hit

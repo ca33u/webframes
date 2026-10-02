@@ -62,7 +62,7 @@ nonisolated enum BundledTools {
         var paths = [ProcessInfo.processInfo.environment["WEBFRAMES_CODEX_BINARY"]].compactMap { $0 }
         for folder in [URL(fileURLWithPath: "/Applications"), fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")] {
             for app in ["Codex.app", "ChatGPT.app"] {
-                paths.append(folder.appendingPathComponent(app + "/Contents/Resources/codex").path)
+                if let path = codexAppExecutable(in: folder.appendingPathComponent(app)) { paths.append(path) }
             }
         }
         if let path = executable("codex") { paths.append(path) }
@@ -70,6 +70,15 @@ nonisolated enum BundledTools {
             throw ConnectionSettingsError.message("Install Codex and sign in, then click Connect Codex again.")
         }
         return URL(fileURLWithPath: path)
+    }
+
+    static func codexAppExecutable(in app: URL) -> String? {
+        // Current ChatGPT builds embed the CLI as a nested app; older Codex
+        // and ChatGPT builds placed the executable directly in Resources.
+        let layouts = ["Contents/Resources/codex",
+                       "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"]
+        return layouts.map { app.appendingPathComponent($0).path }
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     static func claude() throws -> URL {

@@ -4,6 +4,27 @@ User-facing changes, newest first. Sparkle release notes are generated from
 this file (see Tools/updates/README.md), so write entries for users, not for
 reviewers. Internal refactors and test-only changes do not belong here.
 
+## 1.1.4 (9) — 2026-10-02
+
+### Added
+- Tidy Up (⌃⌥T, Arrange menu and the alignment bar), like in Figma: lays
+  the selected frames out in an even grid with equal gaps, keeping their
+  reading order and roughly their current shape. With fewer than two frames
+  selected it tidies the whole board. Undoable.
+
+### Fixed
+- A frame's controls (toolbar, link handles, resize grips) are never hidden
+  under another frame. They appear while the frame is hovered, selected or
+  a link target, and stay above every frame; controls of a covered frame no
+  longer show through or catch clicks meant for the frame on top.
+
+## 1.1.3 (8) — 2026-10-02
+
+### Fixed
+- Connect Codex now finds the signed-in coding agent bundled with current
+  ChatGPT desktop releases. It could incorrectly ask you to install Codex
+  even when it was already installed and signed in.
+
 ## 1.1.2 (7) — 2026-09-30
 
 ### Added

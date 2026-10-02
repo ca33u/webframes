@@ -5,9 +5,11 @@ enum FrameArrangement: String, CaseIterable {
     case left = "Align Left", horizontalCenter = "Align Horizontal Centers", right = "Align Right"
     case top = "Align Top", verticalCenter = "Align Vertical Centers", bottom = "Align Bottom"
     case horizontalSpacing = "Distribute Horizontally", verticalSpacing = "Distribute Vertically"
+    case tidyUp = "Tidy Up"
 
     func positions(for frames: [FrameModel]) -> [String: CGPoint] {
         guard frames.count >= 2 else { return [:] }
+        if self == .tidyUp { return Self.tidyPositions(frames) }
         let minX = frames.map(\.x).min()!, minY = frames.map(\.y).min()!
         let maxX = frames.map { $0.x + $0.w }.max()!, maxY = frames.map { $0.y + $0.h }.max()!
         var result = Dictionary(uniqueKeysWithValues: frames.map { ($0.id, CGPoint(x: $0.x, y: $0.y)) })
@@ -48,11 +50,61 @@ enum FrameArrangement: String, CaseIterable {
     }
 }
 
+// MARK: - Tidy up
+
+extension FrameArrangement {
+    /// Figma's Tidy Up: a grid with equal gaps, keeping reading order (rows
+    /// top to bottom, left to right within a row) and roughly the current
+    /// overall shape. Columns take their widest frame, rows their tallest;
+    /// each frame sits at the top-left of its cell. The grid starts at the
+    /// selection's top-left corner.
+    static func tidyPositions(_ frames: [FrameModel]) -> [String: CGPoint] {
+        let n = frames.count
+        guard n >= 2 else { return [:] }
+        let minX = frames.map(\.x).min()!, minY = frames.map(\.y).min()!
+        let maxX = frames.map { $0.x + $0.w }.max()!, maxY = frames.map { $0.y + $0.h }.max()!
+        let cellW = max(1, frames.map(\.w).max()!), cellH = max(1, frames.map(\.h).max()!)
+        let gap = min(80, max(16, (min(cellW, cellH) * 0.08).rounded()))
+
+        // Columns that keep the selection's aspect ratio for cells of this shape.
+        let aspect = max(0.01, (maxX - minX) / max(1, maxY - minY))
+        let ideal = (Double(n) * Double(aspect) * Double(cellH / cellW)).squareRoot()
+        let columns = min(n, max(1, Int(ideal.rounded())))
+
+        // Reading order: band by vertical center, then left to right.
+        let byRow = frames.sorted {
+            let a = $0.y + $0.h / 2, b = $1.y + $1.h / 2
+            return a == b ? $0.x < $1.x : a < b
+        }
+        var rows: [[FrameModel]] = stride(from: 0, to: n, by: columns).map {
+            Array(byRow[$0..<min($0 + columns, n)]).sorted { $0.x == $1.x ? $0.id < $1.id : $0.x < $1.x }
+        }
+        if rows.isEmpty { rows = [byRow] }
+
+        var colWidths = [CGFloat](repeating: 0, count: columns)
+        for row in rows { for (c, f) in row.enumerated() { colWidths[c] = max(colWidths[c], f.w) } }
+        var result: [String: CGPoint] = [:]
+        var y = minY
+        for row in rows {
+            var x = minX
+            for (c, f) in row.enumerated() {
+                result[f.id] = CGPoint(x: x, y: y)
+                x += colWidths[c] + gap
+            }
+            y += (row.map(\.h).max() ?? 0) + gap
+        }
+        return result
+    }
+}
+
 // MARK: - Toolbar and shortcuts
 
 extension FrameArrangement {
     /// Aligning needs two frames; distributing needs three.
     var minimumSelection: Int { self == .horizontalSpacing || self == .verticalSpacing ? 3 : 2 }
+
+    /// Index in `allCases` where a new toolbar/menu group starts.
+    static let groupStarts: Set<Int> = [3, 6, 8]
 
     var symbolName: String {
         switch self {
@@ -64,10 +116,11 @@ extension FrameArrangement {
         case .bottom: return "align.vertical.bottom"
         case .horizontalSpacing: return "distribute.horizontal.center"
         case .verticalSpacing: return "distribute.vertical.center"
+        case .tidyUp: return "square.grid.2x2"
         }
     }
 
-    /// Figma's shortcuts: ⌥A ⌥H ⌥D ⌥W ⌥V ⌥S, distribute ⌃⌥H / ⌃⌥V.
+    /// Figma's shortcuts: ⌥A ⌥H ⌥D ⌥W ⌥V ⌥S, distribute ⌃⌥H / ⌃⌥V, tidy up ⌃⌥T.
     var keyEquivalent: String {
         switch self {
         case .left: return "a"
@@ -76,11 +129,12 @@ extension FrameArrangement {
         case .top: return "w"
         case .verticalCenter, .verticalSpacing: return "v"
         case .bottom: return "s"
+        case .tidyUp: return "t"
         }
     }
 
     var keyModifiers: NSEvent.ModifierFlags {
-        self == .horizontalSpacing || self == .verticalSpacing ? [.control, .option] : [.option]
+        [.horizontalSpacing, .verticalSpacing, .tidyUp].contains(self) ? [.control, .option] : [.option]
     }
 
     var shortcutLabel: String {
