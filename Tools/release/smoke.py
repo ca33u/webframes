@@ -84,5 +84,8 @@ with tempfile.TemporaryDirectory(prefix='Web Frames Installed Smoke ') as direct
     ]
     result = subprocess.run([str(node), str(tools / 'comments-mcp.mjs')],
         input=''.join(json.dumps(m)+'\n' for m in messages), text=True, capture_output=True, cwd=root, env=env, timeout=10, check=True)
-    assert 'list_comments' in result.stdout and 'set_comment_status' in result.stdout
-    print('PASS: packaged comments MCP initializes and advertises tools')
+    responses = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    listed = next(response for response in responses if response.get('id') == 2)
+    names = {tool['name'] for tool in listed['result']['tools']}
+    assert {'list_comments', 'set_comment_status', 'list_frames', 'get_frame', 'update_frame_image'} <= names
+    print('PASS: packaged comments MCP initializes and advertises comment and frame-image tools')

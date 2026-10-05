@@ -5,7 +5,7 @@ import CoreGraphics
 /// inside it the header and border keep a fixed size in screen points
 /// (FrameCardView lays them out unscaled), so in world units they shrink or
 /// grow with 1/scale. There is no separate mobile header.
-enum CardGeometry {
+nonisolated enum CardGeometry {
     static let border: CGFloat = 1
     static let header: CGFloat = 34
     /// World-unit padding added to the logical frame size for the card rect.

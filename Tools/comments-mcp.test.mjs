@@ -13,7 +13,8 @@ const screenshot = Buffer.from('fake-png').toString('base64');
 writeFileSync(file, JSON.stringify({
   name: 'Demo',
   projectMap: {rootPath: '/tmp/demo-source', framework: 'Next.js'},
-  frames: [{id: 'f1', label: 'Home', url: 'https://raw.githubusercontent.com/acme/site/main/index.html?token=legacy-secret', w: 1280, h: 800}],
+  sections: [{id: 's1', name: 'Onboarding', x: -100, y: -100, w: 2000, h: 1200}],
+  frames: [{id: 'f1', label: 'Home', url: 'https://raw.githubusercontent.com/acme/site/main/index.html?token=legacy-secret', x: 0, y: 0, w: 1280, h: 800}],
   annotations: [{
     id: 'a1', num: 1, frameId: 'f1', comment: 'Increase heading size', resolved: false,
     xPct: 20, yPct: 30, color: 'orange', edits: {},
@@ -69,6 +70,8 @@ try {
   assert.equal(detail.result.content[1].data, screenshot);
   const brief = await request(4, 'tools/call', {name: 'get_agent_brief', arguments: {}});
   assert.match(brief.result.content[0].text, /Increase heading size/);
+  assert.match(brief.result.content[0].text, /Section: Onboarding/);
+  assert.equal(payload.comments[0].frame.section, 'Onboarding');
   assert.match(brief.result.content[0].text, /Area: x 128, y 320, 384×160 CSS px of the viewport; contains div\.card "Revenue"/);
   assert.equal(payload.comments[0].element.area, null);
   assert.equal(payload.comments[1].element.area.width, 384);
@@ -94,7 +97,8 @@ test('comments MCP reads package documents and their screenshot files', async ()
   const digest = createHash('sha256').update(png).digest('hex');
   writeFileSync(path.join(pkg, 'images', `${digest}.png`), png);
   writeFileSync(path.join(pkg, 'document.json'), JSON.stringify({
-    version: 2, name: 'Package', frames: [{id: 'f1', label: 'Home', url: 'https://example.com', w: 390, h: 844}],
+    version: 2, name: 'Package', frames: [{id: 'f1', label: 'Home', url: 'image://Home', w: 390, h: 844,
+      isImage: true, imgUrl: `wf-image:images/${digest}.png`, imageUpdatedBy: 'MCP agent'}],
     annotations: [{id: 'a1', num: 1, frameId: 'f1', comment: 'Tighten spacing', resolved: false, xPct: 1, yPct: 2,
       color: 'blue', edits: {}, element: {selector: '.card', screenshot: `wf-image:images/${digest}.png`}}],
   }));
@@ -105,13 +109,28 @@ test('comments MCP reads package documents and their screenshot files', async ()
   child.stdout.on('data', chunk => replies.push(...chunk.toString().trim().split('\n').map(line => JSON.parse(line))));
   child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'list_projects', arguments: {}}}) + '\n');
   child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 2, method: 'tools/call', params: {name: 'get_comment', arguments: {id: 'a1'}}}) + '\n');
+  child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 3, method: 'tools/call', params: {name: 'list_frames', arguments: {}}}) + '\n');
+  child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 4, method: 'tools/call', params: {name: 'get_frame', arguments: {frame_id: 'f1'}}}) + '\n');
+  child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 5, method: 'tools/list'}) + '\n');
+  child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 6, method: 'tools/call', params: {name: 'update_frame_image', arguments: {frame_id: 'missing', image_path: '/tmp/screen.png'}}}) + '\n');
   try {
-    for (let i = 0; i < 60 && replies.length < 2; i++) await new Promise(r => setTimeout(r, 50));
+    for (let i = 0; i < 60 && replies.length < 6; i++) await new Promise(r => setTimeout(r, 50));
     const projects = JSON.parse(replies.find(r => r.id === 1).result.content[0].text);
     assert.equal(JSON.stringify(projects).includes('Package'), true);
     const detail = replies.find(r => r.id === 2).result;
     assert.equal(detail.content[1].type, 'image');
     assert.equal(detail.content[1].data, png.toString('base64'));
+    const frames = JSON.parse(replies.find(r => r.id === 3).result.content[0].text).frames;
+    assert.equal(frames[0].id, 'f1');
+    assert.equal(frames[0].isImage, true);
+    assert.equal(frames[0].imageHash, digest);
+    const current = replies.find(r => r.id === 4).result;
+    assert.equal(current.content[1].data, png.toString('base64'));
+    assert.equal(JSON.parse(current.content[0].text).frame.imageUpdatedBy, 'MCP agent');
+    const updateTool = replies.find(r => r.id === 5).result.tools.find(tool => tool.name === 'update_frame_image');
+    assert.deepEqual(updateTool.inputSchema.required, ['frame_id', 'image_path']);
+    assert.equal(updateTool.annotations.readOnlyHint, false);
+    assert.equal(replies.find(r => r.id === 6).result.isError, true);
   } finally {
     child.kill();
     rmSync(base, {recursive: true, force: true});

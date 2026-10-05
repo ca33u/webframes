@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
     private let codexStatus = NSTextField(wrappingLabelWithString: "")
     private let claudeStatus = NSTextField(wrappingLabelWithString: "")
     private var resolveCommentsToggle: NSButton?
+    private var updateFrameImagesToggle: NSButton?
     private var codexButtons: [NSButton] = []
     private var keyCards: [ProviderKeyCard] = []
     private var task: Task<Void, Never>?
@@ -60,6 +61,7 @@ import UniformTypeIdentifiers
         _ = view
         keyCards.forEach { $0.refreshPresence() }; refreshCodex(); reloadTrustedFolders(); refreshEvidence()
         resolveCommentsToggle?.state = CommentsMCPInbox.isAllowed ? .on : .off
+        updateFrameImagesToggle?.state = CommentsMCPInbox.areFrameImagesAllowed ? .on : .off
         if let reason = CommentsMCPInbox.unavailableReason {
             claudeStatus.stringValue = "MCP inbox unavailable: " + reason
             claudeStatus.textColor = .systemOrange
@@ -184,10 +186,19 @@ import UniformTypeIdentifiers
         resolveCommentsToggle = toggle
         card.addRow(toggle)
         card.addRow(SettingsUI.label("Allows local MCP clients on this Mac to resolve or reopen comments in open projects. Changes can be undone. Source edits still require review and Apply.", size: 11))
+        let imagesToggle = NSButton(checkboxWithTitle: "Allow agents to update frame images", target: self, action: #selector(changeFrameImagesPermission(_:)))
+        imagesToggle.state = CommentsMCPInbox.areFrameImagesAllowed ? .on : .off
+        imagesToggle.setAccessibilityIdentifier("settings.mcp.allowUpdateImages")
+        updateFrameImagesToggle = imagesToggle
+        card.addRow(imagesToggle)
+        card.addRow(SettingsUI.label("Allows local agents to replace image frames with fresh screenshots. Comments keep their original snapshots. Updates can be undone.", size: 11))
         return card
     }
     @objc private func changeMCPPermission(_ sender: NSButton) {
         UserDefaults.standard.set(sender.state == .on, forKey: CommentsMCPInbox.permissionKey)
+    }
+    @objc private func changeFrameImagesPermission(_ sender: NSButton) {
+        UserDefaults.standard.set(sender.state == .on, forKey: CommentsMCPInbox.frameImagesPermissionKey)
     }
     @objc private func refreshCodex() {
         guard isViewLoaded else { return }

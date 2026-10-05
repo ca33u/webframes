@@ -4,6 +4,35 @@ User-facing changes, newest first. Sparkle release notes are generated from
 this file (see Tools/updates/README.md), so write entries for users, not for
 reviewers. Internal refactors and test-only changes do not belong here.
 
+## 1.1.6 (11) — 2026-10-05
+
+### Added
+- Sections, like in Figma: named areas of the canvas such as
+  "Onboarding". Press ⇧S (or Arrange › Create Section, or the dashed-square
+  button on the alignment bar) to wrap the selected frames in a section; with
+  nothing selected, ⇧S lets you draw one by dragging (Escape cancels).
+  Drag the section's edges or corners to resize it and drop frames in or
+  out — a frame belongs to the section it sits in. Drag the name to move
+  the section with its frames, double-click to rename, right-click to
+  remove the section (its frames stay). Click a section's name or empty
+  area to select it: it gets an accent outline and corner handles, and
+  can then be dragged by its area too. Undoable.
+- In the layers sidebar a section is a collapsible row with its frames
+  listed under it; click the row to select the section's frames.
+- Fix, copied comments and the comments MCP tell the agent which section a
+  commented frame belongs to.
+
+## 1.1.5 (10) — 2026-10-04
+
+### Added
+- Coding agents can replace an image frame with a fresh PNG or JPEG screenshot
+  through MCP. Enable “Allow agents to update frame images” in Settings, then
+  ask your agent to capture the emulator and update the existing frame.
+- Updated screenshots keep the frame's position, size, comments and links.
+  Undo restores the previous image; screenshots attached to earlier comments
+  remain available for comparison.
+- Agents can list frames and read their current images to check the result.
+
 ## 1.1.4 (9) — 2026-10-02
 
 ### Added

@@ -450,6 +450,7 @@ final class AstraReviewWindow: NSWindowController, NSWindowDelegate {
             let frames = project.workspace.frames
             let screenshots = try CodexCommentImages.make(frames: frames.filter { frameIDs.contains($0.id) && $0.isImage })
             let context = CodexCommentContextBuilder.make(annotations: open, frames: frames,
+                sections: project.workspace.sections,
                 projectName: project.payload.name, frameScreenshots: screenshots)
             invalidate()
             statusLabel.stringValue = "Reading comments and screenshots…"

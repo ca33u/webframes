@@ -28,6 +28,8 @@ struct CodexCommentContext: Codable, Equatable {
     /// Area comments: the selected region and the elements inside it. The
     /// comment applies to the whole region; nil for a point comment.
     var area: String? = nil
+    /// Name of the section (named group of frames) the comment's frame is in.
+    var section: String? = nil
 }
 
 struct CodexCommentFixPatchEntry {
@@ -215,10 +217,12 @@ final class CodexCommentFixService {
 
 enum CodexCommentContextBuilder {
     static func make(annotations: [AnnotationModel],
-                     frames: [FrameModel], projectName: String = "",
+                     frames: [FrameModel], sections: [SectionModel] = [], projectName: String = "",
                      frameScreenshots: [String: String] = [:]) -> (comments: [CodexCommentContext], images: [String]) {
         var images: [String] = []
         var imageIndices: [String: Int] = [:]
+        let membership = SectionModel.membership(frames: frames, sections: sections)
+        let sectionNames = Dictionary(uniqueKeysWithValues: sections.map { ($0.id, $0.name) })
         let openFrameIDs = Set(annotations.filter { !$0.resolved }.map(\.frameId))
         for frame in frames where openFrameIDs.contains(frame.id) {
             if images.count < 5, let png = frameScreenshots[frame.id] {
@@ -254,7 +258,8 @@ enum CodexCommentContextBuilder {
                 screenshotIndex: screenshotIndex,
                 projectName: projectName,
                 xPct: Double(annotation.xPct), yPct: Double(annotation.yPct),
-                area: annotation.areaSummary
+                area: annotation.areaSummary,
+                section: membership[annotation.frameId].flatMap { sectionNames[$0] }
             )
         }
         return (comments, images)

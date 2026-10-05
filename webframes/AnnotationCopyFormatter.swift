@@ -89,9 +89,12 @@ enum AnnotationCopyFormatter {
     /// numbered list. Returns `"No comments."` when the active set
     /// is empty (resolved annotations are excluded, matching JS).
     nonisolated static func fullText(annotations: [AnnotationModel],
-                                     frames: [FrameModel]) -> String {
+                                     frames: [FrameModel],
+                                     sections sectionModels: [SectionModel] = []) -> String {
         let active = annotations.filter { !$0.resolved }
         guard !active.isEmpty else { return "No comments." }
+        let membership = SectionModel.membership(frames: frames, sections: sectionModels)
+        let sectionNames = Dictionary(uniqueKeysWithValues: sectionModels.map { ($0.id, $0.name) })
         // Preserve first-encounter frame order.
         var groupOrder: [String] = []
         var groups: [String: (frameId: String, url: String?, label: String?,
@@ -119,6 +122,9 @@ enum AnnotationCopyFormatter {
             var header = "# Web Frames — \(label)\n\(url)"
             if !viewport.isEmpty { header += " · \(viewport)" }
             header += " · \(count) comment\(plural)"
+            if let name = membership[g.frameId].flatMap({ sectionNames[$0] }) {
+                header += "\nSection: \(name)"
+            }
             header += "\nFollow my instructions on these elements."
             header += "\nWhen applying design changes, map values to the project design system (Tailwind classes, CSS variables, or design tokens)."
             header += "\n---"

@@ -126,6 +126,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     /// Tracks renderer kind as well as identity. Freezing/restoring keeps
     /// the same frame id, so a kind change must rebuild its inner WKWebView.
     private var liveFrameImageKinds: [String: Bool] = [:]
+    private var liveFrameImageURLs: [String: String] = [:]
     private let snapshotCaptureService = AstraCaptureService()
     private var snapshotCapturesInProgress = Set<String>()
 
@@ -417,6 +418,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         // Only links attached to a moving frame are re-routed per frame.
         linkLayer.liveRouteIDs = Set(workspace.links.filter { moving.contains($0.fromId) || moving.contains($0.toId) }.map(\.id))
         pushLinksFromWorkspace()
+        pushSectionsFromWorkspace()
     }
 
     private func frameWithLivePreview(_ f: FrameModel) -> FrameModel {
@@ -803,6 +805,15 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     // CanvasHost.
 
     // MARK: - FramesSidebarDelegate
+
+    func framesSidebar(_ sidebar: FramesSidebar, didSelectSectionID id: String) {
+        window?.makeFirstResponder(self)
+        selectSection(id)
+    }
+
+    func framesSidebar(_ sidebar: FramesSidebar, didSetSectionID id: String, collapsed: Bool) {
+        document?.workspace.setSectionCollapsed(id: id, collapsed: collapsed)
+    }
 
     /// Clicking a row in the sidebar selects the frame AND pans the
     /// viewport so the frame's center lands at the visible canvas
@@ -1544,6 +1555,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         // can't rely on `NSCursor.set()` / an event monitor because
         // cursor changes requested from WebContent arrive out-of-band
         // after our monitor runs and flip the cursor back.
+        if on { setSectionDrawArmed(false) }
         annotationCursorShield.isHidden = !on
         annotationCursorShield.window?.invalidateCursorRects(for: annotationCursorShield)
         if !on { clearAnnotationHighlight(); cancelAnnotationPress() }
@@ -1895,6 +1907,9 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         // dots to show through); per-frame WKWebViews + the native link
         // layer are the only painters above this now.
         addSubview(canvasBackdrop)
+        // Sections draw under the frames (their titles sit outside them).
+        addSubview(sectionLayer)
+        sectionLayer.delegate = self
         addSubview(frameLayer)
         // Link layer sits ABOVE frames so bezier arrows render on top of
         // frame chrome — matches the pre-migration layering where `.dc`
@@ -2041,6 +2056,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         bridge.destroyAllFrames()
         liveFrameIds.removeAll()
         liveFrameImageKinds.removeAll()
+        liveFrameImageURLs.removeAll()
     }
 
     // MARK: - Workspace observer (Phase 6e Step 0)
@@ -2144,6 +2160,12 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
             px:    workspace.viewport.panX,
             py:    workspace.viewport.panY
         )
+        sectionLayer.setView(
+            scale: workspace.viewport.scale,
+            px:    workspace.viewport.panX,
+            py:    workspace.viewport.panY
+        )
+        pushSectionsFromWorkspace()
 
         // Pan / zoom only moves the frame cards; comments, pins and the
         // sidebar selection are unaffected. Skipping their rebuild here is
@@ -2294,13 +2316,17 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
                     cardRect: cardRect,
                     logicalSize: CGSize(width: frame.w, height: frame.h)
                 )
-                if frame.isImage,
-                   case .string(let dataURL) = frame.extras["imgUrl"] ?? .null,
-                   !dataURL.isEmpty {
-                    bridge.loadImageInFrame(id: frame.id, dataURL: dataURL)
-                }
             }
         }
+        var imageURLs: [String: String] = [:]
+        for frame in workspace.frames where frame.isImage {
+            guard case .string(let dataURL)? = frame.extras["imgUrl"], !dataURL.isEmpty else { continue }
+            imageURLs[frame.id] = dataURL
+            if additions.contains(frame.id) || liveFrameImageURLs[frame.id] != dataURL {
+                bridge.loadImageInFrame(id: frame.id, dataURL: dataURL)
+            }
+        }
+        liveFrameImageURLs = imageURLs
         liveFrameIds = allFrameIds
         bridge.setFrameOrder(workspace.frames.map(\.id))
 
@@ -2402,6 +2428,162 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         linkLayer.setLinks(nativeLinks, obstacles: linkObstacles)
     }
 
+    // MARK: - Sections
+
+    let sectionLayer = SectionLayerView(frame: .zero)
+
+    /// In-flight move (by the title) or resize (by an edge) of a section.
+    private struct SectionGesture {
+        let id: String
+        let edge: SectionEdge?          // nil = move
+        let startWorld: CGPoint
+        let originRect: CGRect
+        var currentRect: CGRect
+        let movesFrames: Bool
+    }
+    private var sectionGesture: SectionGesture?
+
+    /// ⇧S with nothing selected: the next drag on the canvas draws a section.
+    private(set) var sectionDrawArmed = false
+
+    /// The section itself is selected (by its title, or a click on its empty
+    /// area): highlighted with corner handles so it reads as movable and
+    /// resizable even when it holds no frames.
+    private(set) var selectedSectionID: String? {
+        didSet { if oldValue != selectedSectionID { pushSectionsFromWorkspace() } }
+    }
+
+    private func sectionRect(_ section: SectionModel) -> CGRect {
+        if let g = sectionGesture, g.id == section.id { return g.currentRect }
+        return section.rect
+    }
+
+    /// Sections → canvas, with any in-flight move/resize applied.
+    private func pushSectionsFromWorkspace() {
+        guard let workspace = document?.workspace else { return }
+        let membership = workspace.sectionMembership
+        let selected = Set(selectedFrameIDs)
+        let natives: [NativeSection] = workspace.sections.map { section in
+            let members = workspace.frames.filter { membership[$0.id] == section.id }.map(\.id)
+            return NativeSection(id: section.id, name: section.name, worldRect: sectionRect(section),
+                                 selected: section.id == selectedSectionID
+                                    || (!members.isEmpty && members.allSatisfy(selected.contains)))
+        }
+        sectionLayer.setSections(natives)
+    }
+
+    func isSectionTitleRegion(_ hostPoint: NSPoint) -> Bool {
+        sectionLayer.isInteractive(at: convert(hostPoint, to: sectionLayer))
+    }
+
+    /// ⇧S: wraps the selected frames in a section, or with nothing selected
+    /// arms drawing one (drag on the canvas; Escape cancels).
+    func createSectionFromSelection() {
+        guard let workspace = document?.workspace else { return }
+        let selected = workspace.frames.filter { selectedFrameIDs.contains($0.id) }
+        guard let area = SectionModel.area(of: selected) else { setSectionDrawArmed(true); return }
+        createSection(rect: area)
+    }
+
+    private func createSection(rect: CGRect) {
+        guard let workspace = document?.workspace,
+              let section = workspace.createSection(name: "Section \(workspace.sections.count + 1)", rect: rect) else { return }
+        DispatchQueue.main.async { [weak self] in self?.sectionLayer.beginRenaming(sectionID: section.id) }
+    }
+
+    func setSectionDrawArmed(_ on: Bool) {
+        guard sectionDrawArmed != on else { return }
+        sectionDrawArmed = on
+        // Reuse the crosshair shield: it also lets the drag start over frames.
+        annotationCursorShield.isHidden = !on && !annotationMode
+        annotationCursorShield.window?.invalidateCursorRects(for: annotationCursorShield)
+    }
+
+    /// Finishes a drawn section from the marquee's world rect. A click
+    /// without a drag makes a default-size section at that point.
+    private func finishSectionDraw(worldRect: CGRect?, at point: CGPoint) {
+        setSectionDrawArmed(false)
+        var rect = worldRect ?? .zero
+        let scale = document?.workspace.viewport.scale ?? 1
+        if rect.width * scale < 8 || rect.height * scale < 8 {
+            rect = CGRect(x: point.x, y: point.y, width: 800, height: 600)
+        }
+        rect.size.width = max(rect.width, SectionModel.minimumSize.width)
+        rect.size.height = max(rect.height, SectionModel.minimumSize.height)
+        createSection(rect: rect)
+    }
+
+    func selectSection(_ id: String) {
+        guard let workspace = document?.workspace,
+              let section = workspace.sections.first(where: { $0.id == id }) else { return }
+        setFrameSelection(workspace.frames(in: section).map(\.id))
+    }
+
+    private func worldPoint(of event: NSEvent) -> CGPoint {
+        let p = convert(event.locationInWindow, from: nil)
+        return worldPoint(clientX: p.x, clientY: flipClientY(p.y))
+    }
+
+    fileprivate func beginSectionGesture(id: String, edge: SectionEdge?, event: NSEvent) {
+        guard let workspace = document?.workspace,
+              let section = workspace.sections.first(where: { $0.id == id }) else { return }
+        let members = workspace.frames(in: section)
+        var movesFrames = false
+        defer { selectedSectionID = id }
+        if edge == nil, let first = members.first {
+            // Moving: the section's frames travel with it (group frame drag).
+            setFrameSelection(members.map(\.id))
+            let p = convert(event.locationInWindow, from: nil)
+            beginFrameDrag(id: first.id, clientX: p.x, clientY: p.y)
+            movesFrames = frameDragState != nil
+        }
+        sectionGesture = SectionGesture(id: id, edge: edge, startWorld: worldPoint(of: event),
+                                        originRect: section.rect, currentRect: section.rect, movesFrames: movesFrames)
+    }
+
+    var isSectionGestureActive: Bool { sectionGesture != nil }
+
+    /// Press inside the selected section's empty area: move the section.
+    func beginSelectedSectionDrag(_ event: NSEvent) -> Bool {
+        guard let id = selectedSectionID, let workspace = document?.workspace,
+              let section = workspace.sections.first(where: { $0.id == id }),
+              section.rect.contains(worldPoint(of: event)) else { return false }
+        beginSectionGesture(id: id, edge: nil, event: event)
+        return true
+    }
+
+    func updateSectionGesture(event: NSEvent) {
+        guard var g = sectionGesture else { return }
+        let w = worldPoint(of: event)
+        let dx = w.x - g.startWorld.x, dy = w.y - g.startWorld.y
+        g.currentRect = SectionEdge.apply(g.edge, to: g.originRect, dx: dx, dy: dy, minimum: SectionModel.minimumSize)
+        sectionGesture = g
+        if g.movesFrames {
+            let p = convert(event.locationInWindow, from: nil)
+            updateFrameDrag(clientX: p.x, clientY: p.y)
+        }
+        pushSectionsFromWorkspace()
+    }
+
+    func endSectionGesture() {
+        guard let g = sectionGesture, let workspace = document?.workspace else { return }
+        // Frames and area commit in the same event, so one undo step.
+        if g.movesFrames { endFrameDrag() }
+        sectionGesture = nil
+        workspace.setSectionRect(id: g.id, rect: g.currentRect, action: g.edge == nil ? "Move Section" : "Resize Section")
+        pushSectionsFromWorkspace()
+    }
+
+    @objc private func renameSectionFromMenu(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String { sectionLayer.beginRenaming(sectionID: id) }
+    }
+    @objc private func selectSectionFromMenu(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String { selectSection(id) }
+    }
+    @objc private func deleteSectionFromMenu(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String { document?.workspace.deleteSection(id: id) }
+    }
+
     // MARK: - LinkLayerViewDelegate (Phase 6e Step 2)
 
     /// User clicked on a link curve. Make it the selection (drops any
@@ -2474,6 +2656,9 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     /// geometry, but `pushLinksFromWorkspace` is cheap (a single
     /// CAShapeLayer reconcile) and keeps any stale ring state clean.
     func setFrameSelection(_ ids:[String]) {
+        // Selecting frames (or clicking away) deselects a section; a press on
+        // a section's title selects it again right after.
+        selectedSectionID = nil
         let previous = selectedFrameIDs
         var seen = Set<String>()
         selectedFrameIDs = ids.filter { document?.workspace.frame(id: $0) != nil && seen.insert($0).inserted }
@@ -2481,7 +2666,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         updateArrangementBar()
         selectedLinkId = nil;hoveredLinkId = nil
         for id in Set(previous + selectedFrameIDs) {bridge.repaintFrameChrome(id:id)}
-        sidebar?.setSelectedFrameID(selectedFrameId);pushLinksFromWorkspace();onFrameSelectionChanged?()
+        sidebar?.setSelectedFrameID(selectedFrameId);pushLinksFromWorkspace();pushSectionsFromWorkspace();onFrameSelectionChanged?()
     }
     private var lastSelectionEvent: Int?
     /// Frame a Shift/⌘-press just removed from the selection, so a drag
@@ -2528,6 +2713,20 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
                 arrangementButtons[action] = button
                 arrangementBar.addArrangedSubview(button)
             }
+            arrangementBar.addArrangedSubview(Self.arrangementSeparator())
+            let section = NSButton(image: NSImage(systemSymbolName: "square.dashed", accessibilityDescription: "Create Section")!,
+                                   target: self, action: #selector(createSectionFromToolbar(_:)))
+            section.isBordered = false
+            section.bezelStyle = .regularSquare
+            section.imagePosition = .imageOnly
+            section.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+            section.contentTintColor = WFDesign.text
+            section.toolTip = "Create Section  ⇧S"
+            section.setAccessibilityLabel("Create Section")
+            section.setAccessibilityIdentifier("canvas.arrange.section")
+            section.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            section.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            arrangementBar.addArrangedSubview(section)
             arrangementBar.spacing = 2
             arrangementBar.wantsLayer = true
             arrangementBar.layer?.backgroundColor = WFDesign.bg2.cgColor
@@ -2560,6 +2759,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         let selected = frames.filter { selectedFrameIDs.contains($0.id) }
         return action == .tidyUp && selected.count < 2 ? frames : selected
     }
+    @objc private func createSectionFromToolbar(_ sender: NSButton) { createSectionFromSelection() }
     @objc private func arrangeFromToolbar(_ sender: NSButton) {
         guard FrameArrangement.allCases.indices.contains(sender.tag) else { return }
         arrangeSelection(FrameArrangement.allCases[sender.tag])
@@ -2596,8 +2796,9 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     private let marqueeLayer = CAShapeLayer()
     var isMarqueeSelecting: Bool { marqueeStart != nil }
     func beginMarquee(at point: CGPoint, additive: Bool) {
-        marqueeStart = point; marqueeBase = additive ? selectedFrameIDs : []
-        setFrameSelection(marqueeBase)
+        marqueeStart = point; marqueeBase = additive || sectionDrawArmed ? selectedFrameIDs : []
+        marqueeWorldRect = nil
+        if !sectionDrawArmed { setFrameSelection(marqueeBase) }
         wantsLayer = true
         marqueeLayer.fillColor = WFDesign.accent.withAlphaComponent(0.12).cgColor
         marqueeLayer.strokeColor = WFDesign.accent.cgColor
@@ -2612,11 +2813,40 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         let a = worldPoint(clientX: rect.minX, clientY: bounds.height - rect.maxY)
         let b = worldPoint(clientX: rect.maxX, clientY: bounds.height - rect.minY)
         let worldRect = CGRect(x: a.x, y: a.y, width: b.x-a.x, height: b.y-a.y)
+        marqueeWorldRect = worldRect
+        // Drawing a section: the marquee is the new section's area.
+        guard !sectionDrawArmed else { return }
         let hits = workspace.frames.filter { worldRect.intersects(CGRect(x: $0.x, y: $0.y, width: $0.w, height: $0.h)) }.map(\.id)
         setFrameSelection(marqueeBase + hits)
     }
-    func cancelMarquee() { setFrameSelection(marqueeBase); endMarquee() }
-    func endMarquee() { marqueeStart = nil; marqueeBase = []; marqueeLayer.removeFromSuperlayer(); marqueeLayer.path = nil }
+    private var marqueeWorldRect: CGRect?
+    func cancelMarquee() {
+        if sectionDrawArmed { setSectionDrawArmed(false) } else { setFrameSelection(marqueeBase) }
+        clearMarquee()
+    }
+    func endMarquee() {
+        if let start = marqueeStart {
+            let origin = worldPoint(clientX: start.x, clientY: flipClientY(start.y))
+            if sectionDrawArmed {
+                finishSectionDraw(worldRect: marqueeWorldRect, at: origin)
+            } else if isClick(marqueeWorldRect), let workspace = document?.workspace {
+                // A click on a section's empty area selects the section.
+                selectedSectionID = workspace.sections
+                    .filter { $0.rect.contains(origin) }
+                    .min { $0.rect.width * $0.rect.height < $1.rect.width * $1.rect.height }?.id
+            }
+        }
+        clearMarquee()
+    }
+    private func isClick(_ worldRect: CGRect?) -> Bool {
+        guard let r = worldRect else { return true }
+        let scale = document?.workspace.viewport.scale ?? 1
+        return r.width * scale < 4 && r.height * scale < 4
+    }
+    private func clearMarquee() {
+        marqueeStart = nil; marqueeBase = []; marqueeWorldRect = nil
+        marqueeLayer.removeFromSuperlayer(); marqueeLayer.path = nil
+    }
 
     /// Drop the frame selection if any. Called from the window-level
     /// mouseDown monitor when the user clicks somewhere that isn't a
@@ -3223,7 +3453,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     private func openCommentsMarkdown() -> String? {
         guard let workspace = document?.workspace,
               workspace.annotations.contains(where: { !$0.resolved }) else { return nil }
-        return AnnotationCopyFormatter.fullText(annotations: workspace.annotations, frames: workspace.frames)
+        return AnnotationCopyFormatter.fullText(annotations: workspace.annotations, frames: workspace.frames, sections: workspace.sections)
     }
 
     func annotationPanelDidRequestCopyAll() {
@@ -3520,6 +3750,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     override func layout() {
         super.layout()
         canvasBackdrop.frame = bounds
+        sectionLayer.frame = bounds
         frameLayer.frame = bounds
         linkLayer.frame = bounds
         annotationCursorShield.frame = bounds
@@ -3595,6 +3826,41 @@ final class FrameLayerView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
         return hit === self ? nil : hit
+    }
+}
+
+// MARK: - SectionLayerViewDelegate
+
+extension CanvasHost: SectionLayerViewDelegate {
+    func sectionLayer(_ layer: SectionLayerView, didBegin edge: SectionEdge?, section id: String, event: NSEvent) {
+        beginSectionGesture(id: id, edge: edge, event: event)
+    }
+
+    func sectionLayer(_ layer: SectionLayerView, didDragSection id: String, event: NSEvent) {
+        updateSectionGesture(event: event)
+    }
+
+    func sectionLayer(_ layer: SectionLayerView, didReleaseSection id: String, event: NSEvent) {
+        endSectionGesture()
+    }
+
+    func sectionLayer(_ layer: SectionLayerView, didRenameSection id: String, to name: String) {
+        document?.workspace.renameSection(id: id, name: name)
+    }
+
+    func sectionLayer(_ layer: SectionLayerView, menuForSection id: String) -> NSMenu? {
+        let menu = NSMenu()
+        for (title, action) in [("Rename", #selector(renameSectionFromMenu(_:))),
+                                ("Select Frames", #selector(selectSectionFromMenu(_:)))] {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = id
+        }
+        menu.addItem(.separator())
+        let remove = menu.addItem(withTitle: "Remove Section", action: #selector(deleteSectionFromMenu(_:)), keyEquivalent: "")
+        remove.target = self
+        remove.representedObject = id
+        return menu
     }
 }
 

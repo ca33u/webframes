@@ -69,6 +69,9 @@ Your account needs access to GPT-6 Astra; account usage limits apply.
 
 Comments stay open until reviewed. Agents can change comment status only when
 you enable Allow agents to resolve comments in Settings. Source changes require Apply.
+To refresh screenshots through MCP, enable Allow agents to update frame images
+in Settings. Your coding agent captures the emulator and replaces the existing
+image frame; Undo restores its previous image.
 Check for Updates is in the Web Frames menu.
 ''')
     name = f"WebFrames-{info['CFBundleShortVersionString']}-{info['CFBundleVersion']}-arm64"

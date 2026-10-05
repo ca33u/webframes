@@ -1,4 +1,4 @@
-import {setCommentStatus} from './comments-mutations.mjs';
+import {setCommentStatus, updateFrameImage, storedImage} from './comments-mutations.mjs';
 import {readFileSync, readdirSync, statSync} from 'node:fs';
 import {homedir} from 'node:os';
 import path from 'node:path';
@@ -23,6 +23,24 @@ const projectProperty = {
 };
 
 const tools = [
+  {
+    name: 'update_frame_image',
+    description: 'Replace an existing image frame with a fresh PNG or JPEG screenshot from an absolute local file path (up to 8 MiB). Capture the correct screen using your own simulator/emulator tools first. Requires the project open and Allow agents to update frame images enabled. Preserves frame geometry, links and original comment screenshots; supports Undo. Does not resolve comments, build or launch apps.',
+    inputSchema: {type: 'object', properties: {project: projectProperty, frame_id: {type: 'string', minLength: 1, maxLength: 200}, image_path: {type: 'string', minLength: 1}}, required: ['frame_id', 'image_path'], additionalProperties: false},
+    annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true},
+  },
+  {
+    name: 'list_frames',
+    description: 'List saved frames and their ids, types, sizes and image hashes. Use get_frame to inspect current pixels, or frame.id from a comment to update its image.',
+    inputSchema: {type: 'object', properties: {project: projectProperty}, additionalProperties: false},
+    annotations: {readOnlyHint: true},
+  },
+  {
+    name: 'get_frame',
+    description: 'Read a saved frame and its current image as MCP image content when available. Comment screenshots remain the original evidence; use this tool to inspect an updated image frame.',
+    inputSchema: {type: 'object', properties: {project: projectProperty, frame_id: {type: 'string', minLength: 1, maxLength: 200}}, required: ['frame_id'], additionalProperties: false},
+    annotations: {readOnlyHint: true},
+  },
   {
     name: 'set_comment_status',
     description: 'Resolve or reopen 1–100 comments after verifying the requested work. Requires the project open in Web Frames and the user-enabled Allow agents to resolve comments setting. Changes are saved by the app and can be undone. Does not edit source code.',
@@ -97,6 +115,18 @@ function readProject(file) {
   const annotations = Array.isArray(data.annotations) ? data.annotations : [];
   const frames = Array.isArray(data.frames) ? data.frames : [];
   const byFrame = new Map(frames.map(frame => [frame.id, frame]));
+  // Sections name canvas areas ("Onboarding", "Settings"). A frame belongs
+  // to the smallest section containing its card's center, as in the app.
+  const num = v => (Number.isFinite(v) ? v : NaN);
+  const sections = (Array.isArray(data.sections) ? data.sections : [])
+    .filter(s => s && typeof s.name === 'string' && [s.x, s.y, s.w, s.h].every(v => Number.isFinite(num(v))))
+    .sort((a, b) => a.w * a.h - b.w * b.h);
+  const sectionOf = new Map();
+  for (const frame of frames) {
+    const cx = num(frame.x) + (num(frame.w) + 2) / 2, cy = num(frame.y) + (num(frame.h) + 35) / 2;
+    const s = sections.find(s => cx >= s.x && cx <= s.x + s.w && cy >= s.y && cy <= s.y + s.h);
+    if (s) sectionOf.set(frame.id, s.name.slice(0, 200));
+  }
   return {
     id: path.basename(resolved, '.webframes'),
     file: resolved,
@@ -106,6 +136,7 @@ function readProject(file) {
     framework: typeof projectMap.framework === 'string' ? projectMap.framework : '',
     annotations,
     byFrame,
+    sectionOf,
     packageRoot: isPackage ? resolved : null,
   };
 }
@@ -187,9 +218,11 @@ function publicComment(project, annotation) {
     color: annotation.color || '',
     frame: {
       id: annotation.frameId || frame.id || '',
+      isImage: Boolean(frame.isImage),
       label: annotation.frameLabel || frame.label || '',
       url: contextURL(annotation.frameUrl || frame.url || ''),
       viewport: frame.w && frame.h ? `${Math.round(frame.w)}×${Math.round(frame.h)}` : null,
+      section: project.sectionOf.get(annotation.frameId) || null,
       pin: {xPercent: annotation.xPct ?? null, yPercent: annotation.yPct ?? null},
     },
     element,
@@ -211,22 +244,25 @@ function textContent(value) {
   return [{type: 'text', text: JSON.stringify(value, null, 2)}];
 }
 
-const IMAGE_TYPES = {png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg'};
+function publicFrame(project, frame) {
+  // Package filenames already carry the hash; list_frames avoids reading every image.
+  const ref = /^wf-image:images\/([0-9a-f]{64})\.(png|jpg|jpeg|webp|gif|svg|heic)$/.exec(frame.imgUrl || '');
+  return {
+    id: frame.id, label: frame.label || '', url: contextURL(frame.url || ''), isImage: Boolean(frame.isImage),
+    viewport: {width: frame.w, height: frame.h},
+    section: project.sectionOf.get(frame.id) || null,
+    imageHash: ref?.[1] || storedImage(frame.imgUrl, project.packageRoot)?.hash || null,
+    imageUpdatedBy: frame.imageUpdatedBy || null, imageUpdatedAt: frame.imageUpdatedAt || null,
+  };
+}
 
 function getScreenshot(annotation, project) {
-  const dataURL = annotation?.element?.screenshot;
-  if (typeof dataURL !== 'string') return null;
-  const ref = /^wf-image:images\/([0-9a-f]{64})\.(png|jpg|jpeg)$/.exec(dataURL);
-  if (ref) {
-    if (!project?.packageRoot) return null;
-    try {
-      const data = readFileSync(path.join(project.packageRoot, 'images', `${ref[1]}.${ref[2]}`)).toString('base64');
-      return {type: 'image', mimeType: IMAGE_TYPES[ref[2]], data};
-    } catch { return null; }
-  }
-  const match = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+=*)$/.exec(dataURL);
-  if (!match) return null;
-  return {type: 'image', mimeType: `image/${match[1]}`, data: match[2]};
+  return imageContent(annotation?.element?.screenshot, project);
+}
+
+function imageContent(value, project) {
+  const image = storedImage(value, project.packageRoot);
+  return image ? {type: 'image', mimeType: image.mimeType, data: image.bytes.toString('base64')} : null;
 }
 
 async function callTool(name, args = {}) {
@@ -243,6 +279,16 @@ async function callTool(name, args = {}) {
   }
 
   const project = selectProject(args.project);
+  if (name === 'update_frame_image') return textContent(await updateFrameImage(project, args));
+  if (name === 'list_frames') return textContent({project: {id: project.id, name: project.name}, frames: [...project.byFrame.values()].map(frame => publicFrame(project, frame))});
+  if (name === 'get_frame') {
+    const frame = project.byFrame.get(args.frame_id);
+    if (!frame) throw new Error('Frame not found. Call list_frames first.');
+    const content = textContent({project: {id: project.id, name: project.name}, frame: publicFrame(project, frame)});
+    const screenshot = frame.isImage ? imageContent(frame.imgUrl, project) : null;
+    if (screenshot) content.push(screenshot);
+    return content;
+  }
   if (name === 'set_comment_status') return textContent(await setCommentStatus(project, args));
   if (name === 'list_comments') {
     return textContent({
@@ -272,14 +318,16 @@ async function callTool(name, args = {}) {
       `Open comments: ${comments.length}`,
       '',
       ...comments.flatMap(comment => [
-        `#${comment.number ?? '?'} [${comment.id}] ${comment.frame.label || comment.frame.url}`,
+        `#${comment.number ?? '?'} [${comment.id}] ${comment.frame.label || comment.frame.url} · frame_id: ${comment.frame.id}${comment.frame.isImage ? ' (image)' : ''}`,
         `URL: ${comment.frame.url || '—'} · viewport: ${comment.frame.viewport || '—'}`,
+        ...(comment.frame.section ? [`Section: ${comment.frame.section}`] : []),
         `Element: ${comment.element.selector}`,
         ...(comment.element.area ? [areaLine(comment.element.area)] : []),
         `Comment: ${comment.comment || '(empty)'}`,
         '',
       ]),
       'Inspect the source, implement the requested changes, run appropriate checks, and report which comment ids were addressed. Only use set_comment_status after verifying the fix and when the user has enabled comment changes in Web Frames Settings.',
+      'For image frames, use your own build and simulator/emulator tools to open the correct updated screen and capture a PNG or JPEG. Use update_frame_image with frame_id and the absolute image_path when frame image updates are enabled. Use get_frame for current pixels; get_comment keeps the original screenshot. Replacing an image does not resolve its comments.',
     ];
     return [{type: 'text', text: lines.join('\n')}];
   }
@@ -320,4 +368,3 @@ lines.on('line', async line => {
     }
   }
 });
-

@@ -49,6 +49,9 @@ final class WorkspaceStore {
     private(set) var links:       [LinkModel]       = []
     private(set) var annotations: [AnnotationModel] = []
     private(set) var viewport:    ViewportModel     = .identity
+    /// Named canvas areas (Figma-style sections); frames belong to the
+    /// section containing them.
+    private(set) var sections:    [SectionModel]    = []
 
     /// Project display name. Carried through `apply(_:)` from
     /// `DocumentPayload.name`. Not mutated by any of the mutation methods
@@ -203,6 +206,7 @@ final class WorkspaceStore {
         frames        = payload.frames.compactMap(FrameModel.init(jsonValue:))
         links         = payload.links.compactMap(LinkModel.init(jsonValue:))
         annotations   = payload.annotations.compactMap(AnnotationModel.init(jsonValue:))
+        sections      = (payload.sections ?? []).compactMap(SectionModel.init(jsonValue:))
         viewport      = ViewportModel(jsonValue: payload.canvas)
         nextFrameNum  = payload.nextNum
         nextAnnNum    = payload.annNext
@@ -224,10 +228,78 @@ final class WorkspaceStore {
         p.frames      = frames.map(\.jsonValue)
         p.annotations = annotations.map(\.jsonValue)
         p.links       = links.map(\.jsonValue)
+        p.sections    = sections.isEmpty ? nil : sections.map(\.jsonValue)
         p.canvas      = viewport.jsonValue
         p.nextNum     = nextFrameNum
         p.annNext     = nextAnnNum
         return p
+    }
+
+    // MARK: - Sections
+
+    /// Frame id → section id for frames inside a section.
+    var sectionMembership: [String: String] {
+        SectionModel.membership(frames: frames, sections: sections)
+    }
+
+    /// The section a frame is in (smallest section containing its center).
+    func section(containing frameId: String) -> SectionModel? {
+        guard let id = sectionMembership[frameId] else { return nil }
+        return sections.first { $0.id == id }
+    }
+
+    /// Frames inside a section, in canvas order.
+    func frames(in section: SectionModel) -> [FrameModel] {
+        let membership = sectionMembership
+        return frames.filter { membership[$0.id] == section.id }
+    }
+
+    @discardableResult
+    func createSection(name: String, rect: CGRect) -> SectionModel? {
+        guard rect.width >= 1, rect.height >= 1 else { return nil }
+        let previous = sections
+        let section = SectionModel(id: "s" + UUID().uuidString, name: name, rect: rect.standardized)
+        sections.append(section)
+        finish(.sectionsChanged(previous: previous, action: "Create Section"))
+        return section
+    }
+
+    func renameSection(id: String, name: String) {
+        guard let i = sections.firstIndex(where: { $0.id == id }), sections[i].name != name else { return }
+        let previous = sections
+        sections[i].name = name
+        finish(.sectionsChanged(previous: previous, action: "Rename Section"))
+    }
+
+    /// Moves or resizes a section's area. Moving its frames is the caller's
+    /// job (see CanvasHost), grouped into the same undo step.
+    func setSectionRect(id: String, rect: CGRect, action: String) {
+        guard let i = sections.firstIndex(where: { $0.id == id }), sections[i].rect != rect else { return }
+        let previous = sections
+        sections[i].rect = rect.standardized
+        finish(.sectionsChanged(previous: previous, action: action))
+    }
+
+    /// Removes the section; its frames stay where they are.
+    func deleteSection(id: String) {
+        guard sections.contains(where: { $0.id == id }) else { return }
+        let previous = sections
+        sections.removeAll { $0.id == id }
+        finish(.sectionsChanged(previous: previous, action: "Remove Section"))
+    }
+
+    /// Sidebar expand/collapse; saved with the document, not undoable.
+    func setSectionCollapsed(id: String, collapsed: Bool) {
+        guard let i = sections.firstIndex(where: { $0.id == id }), sections[i].collapsed != collapsed else { return }
+        sections[i].collapsed = collapsed
+        finish(.sectionCollapseChanged)
+    }
+
+    /// Undo/redo of section edits.
+    func restoreSections(_ previous: [SectionModel], action: String) {
+        let current = sections
+        sections = previous
+        finish(.sectionsChanged(previous: current, action: action))
     }
 
     // MARK: - Read-only queries
@@ -421,6 +493,30 @@ final class WorkspaceStore {
         }
         guard changed else { return }
         finish(.imagesReplaced(previousFrames: previousFrames, previousAnnotations: previousAnnotations))
+    }
+
+    /// Replaces only the chosen frame's pixels. Comment screenshots remain the original evidence.
+    func updateAgentFrameImage(id: String, dataURL: String, pixelSize: CGSize, date: Date) {
+        guard let i = frames.firstIndex(where: { $0.id == id }), frames[i].isImage else { return }
+        let previous = frames[i]
+        frames[i].extras["imgUrl"] = .string(dataURL)
+        frames[i].extras["natW"] = .number(Double(pixelSize.width))
+        frames[i].extras["natH"] = .number(Double(pixelSize.height))
+        frames[i].extras["imageUpdatedBy"] = .string("MCP agent")
+        frames[i].extras["imageUpdatedAt"] = .string(ISO8601DateFormatter().string(from: date))
+        frames[i].filePath = nil // the imported source file no longer represents these pixels
+        finish(.frameImageUpdated(previous: previous))
+    }
+
+    /// Image undo preserves moves, labels, links and subsequent comment edits.
+    func restoreFrameImage(_ old: FrameModel) {
+        guard let i = frames.firstIndex(where: { $0.id == old.id }), frames[i].isImage else { return }
+        let previous = frames[i]
+        for key in ["imgUrl", "natW", "natH", "imageUpdatedBy", "imageUpdatedAt"] {
+            frames[i].extras[key] = old.extras[key]
+        }
+        frames[i].filePath = old.filePath
+        finish(.frameImageUpdated(previous: previous))
     }
 
     /// Restores frames and comments captured by `.imagesReplaced`.
@@ -638,6 +734,7 @@ enum WorkspaceMutation {
     case linkDeleted(LinkModel)
     case linkBendsChanged(previous: LinkModel)
     case imagesReplaced(previousFrames: [FrameModel], previousAnnotations: [AnnotationModel])
+    case frameImageUpdated(previous: FrameModel)
     case annotationCreated(AnnotationModel)
     case annotationUpdated(id: String, previous: AnnotationModel)
     case annotationResolvedToggled(id: String, wasResolved: Bool)
@@ -647,4 +744,6 @@ enum WorkspaceMutation {
     /// based on array position, and the counters reset to `count + 1`.
     /// Not undoable (matches JS `annResetCounters`, which had no undo hook).
     case countersReset
+    case sectionsChanged(previous: [SectionModel], action: String)
+    case sectionCollapseChanged
 }

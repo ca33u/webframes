@@ -93,7 +93,13 @@ nonisolated enum ConnectionProbe {
     private(set) var isChecking = false
     private(set) var isVerified = false
     private var connection: AstraCodexConnection?
+    /// The unit-test host is this app with the user's defaults: it must not
+    /// read the real Keychain (an unsigned test build makes macOS prompt for
+    /// access and hangs the run) or start the user's connector.
+    private static let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     private init() {
+        guard !Self.isTestHost else { return }
         if case .success(let json) = KeychainHelper.load(key: key), let data = json.data(using: .utf8),
            let connection = try? JSONDecoder().decode(AstraCodexConnection.self, from: data),
            let client = try? AstraCodexClient(connection: connection) {
@@ -134,7 +140,7 @@ nonisolated enum ConnectionProbe {
         }
     }
     func restoreManagedConnection() {
-        guard UserDefaults.standard.bool(forKey: managedKey) else { return }
+        guard !Self.isTestHost, UserDefaults.standard.bool(forKey: managedKey) else { return }
         Task {
             do { try await connectManaged() }
             catch {

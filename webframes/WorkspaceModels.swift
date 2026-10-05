@@ -475,3 +475,80 @@ extension ViewportModel {
         )
     }
 }
+
+// MARK: Section
+
+/// A named area of the canvas, like a Figma section: tells the user and the
+/// coding agent what a group of frames is ("Onboarding", "Settings"). The
+/// area is free: it can be drawn empty, resized, and frames dropped into it.
+/// Membership is geometric — a frame belongs to the smallest section that
+/// contains its center. `collapsed` only affects the layers sidebar.
+struct SectionModel: Hashable {
+    var id: String
+    var name: String
+    /// World-space area.
+    var rect: CGRect
+    var collapsed: Bool = false
+    /// Fields written by a newer Web Frames; carried through untouched.
+    var extras: [String: JSONValue] = [:]
+
+    /// World-space padding when a section is made around frames.
+    static let padding: CGFloat = 40
+    /// Smallest area a drawn or resized section can have.
+    static let minimumSize = CGSize(width: 120, height: 80)
+
+    /// Area covering the given frames (card chrome included) plus padding,
+    /// or nil when there are none.
+    static func area(of frames: [FrameModel]) -> CGRect? {
+        guard !frames.isEmpty else { return nil }
+        let rects = frames.map(cardRect)
+        let union = rects.dropFirst().reduce(rects[0]) { $0.union($1) }
+        return union.insetBy(dx: -padding, dy: -padding)
+    }
+
+    nonisolated static func cardRect(_ f: FrameModel) -> CGRect {
+        CGRect(x: f.x, y: f.y, width: f.w + CardGeometry.chromeWidth, height: f.h + CardGeometry.chromeHeight)
+    }
+
+    /// Section id for each frame inside a section: the smallest section
+    /// containing the frame's center.
+    nonisolated static func membership(frames: [FrameModel], sections: [SectionModel]) -> [String: String] {
+        let bySize = sections.sorted { $0.rect.width * $0.rect.height < $1.rect.width * $1.rect.height }
+        var result: [String: String] = [:]
+        for f in frames {
+            let r = cardRect(f)
+            let center = CGPoint(x: r.midX, y: r.midY)
+            if let s = bySize.first(where: { $0.rect.contains(center) }) { result[f.id] = s.id }
+        }
+        return result
+    }
+}
+
+extension SectionModel {
+    fileprivate static let typedKeys: Set<String> = ["id", "name", "x", "y", "w", "h", "collapsed"]
+
+    init?(jsonValue: JSONValue) {
+        guard case .object(let o) = jsonValue, case .string(let id) = o["id"] ?? .null,
+              case .number(let x) = o["x"] ?? .null, case .number(let y) = o["y"] ?? .null,
+              case .number(let w) = o["w"] ?? .null, case .number(let h) = o["h"] ?? .null else { return nil }
+        self.id = id
+        if case .string(let name) = o["name"] ?? .null { self.name = name } else { self.name = "Section" }
+        self.rect = CGRect(x: x, y: y, width: w, height: h)
+        if case .bool(let c) = o["collapsed"] ?? .null { self.collapsed = c }
+        var rest: [String: JSONValue] = [:]
+        for (k, v) in o where !SectionModel.typedKeys.contains(k) { rest[k] = v }
+        self.extras = rest
+    }
+
+    var jsonValue: JSONValue {
+        var o = extras
+        o["id"] = .string(id)
+        o["name"] = .string(name)
+        o["x"] = .number(Double(rect.minX))
+        o["y"] = .number(Double(rect.minY))
+        o["w"] = .number(Double(rect.width))
+        o["h"] = .number(Double(rect.height))
+        if collapsed { o["collapsed"] = .bool(true) } else { o.removeValue(forKey: "collapsed") }
+        return .object(o)
+    }
+}

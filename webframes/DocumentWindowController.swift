@@ -558,7 +558,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         // shouldn't mutate underneath.
         if componentCatalogue?.isPresented == true || canvasHost.isModalPresented || astraReviewWindow?.containsControl(at:event.locationInWindow) == true { return }
         let hostPoint = canvasHost.convert(event.locationInWindow, from: nil)
-        if canvasHost.isArrangementBarRegion(hostPoint) || canvasHost.isDockRegion(hostPoint) || canvasHost.isAnnotationPanelRegion(hostPoint) { return }
+        if canvasHost.isArrangementBarRegion(hostPoint) || canvasHost.isDockRegion(hostPoint) || canvasHost.isAnnotationPanelRegion(hostPoint) || canvasHost.isSectionTitleRegion(hostPoint) { return }
         // `LinkLayerView.hitTest(_:)` expects its superview's coord
         // space — linkLayer is a direct child of canvasHost, so
         // hostPoint is exactly that.
@@ -732,6 +732,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             canvasHost.setFrameSelection(canvasHost.document?.workspace.frames.map(\.id) ?? []); return nil
         }
         if event.keyCode == 53, canvasHost.isMarqueeSelecting { canvasHost.cancelMarquee(); return nil }
+        if event.keyCode == 53, canvasHost.sectionDrawArmed { canvasHost.setSectionDrawArmed(false); return nil }
+        if event.keyCode == 53, canvasHost.selectedSectionID != nil { canvasHost.setFrameSelection([]); return nil }
         guard CanvasKeyboard.allowsCanvasShortcut(event) else { return event }
         let action: DockView.Action?
         switch event.keyCode {
@@ -812,7 +814,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             // click semantics even while space is held.
             if canvasHost.isFrameCardRegion(hostPoint) { return event }
             if canvasHost.isDockRegion(hostPoint) || canvasHost.isArrangementBarRegion(hostPoint) { return event }
-            if canvasHost.isAnnotationPanelRegion(hostPoint) { return event }
+            if canvasHost.isAnnotationPanelRegion(hostPoint) || canvasHost.isSectionTitleRegion(hostPoint) { return event }
             // Sidebar lives in a different split pane now — check against
             // the split VC (window coords), not the canvasHost hit-test.
             if splitViewController.isHitInSidePanel(event.locationInWindow) { return event }
@@ -825,6 +827,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             }
             if !canvasHost.spaceHeld && !canvasHost.panLocked {
                 guard !canvasHost.annotationMode, canvasHost.bounds.contains(hostPoint) else { return event }
+                // A selected section moves when dragged by its empty area.
+                if canvasHost.beginSelectedSectionDrag(event) { return nil }
                 canvasHost.beginMarquee(at: hostPoint, additive: !event.modifierFlags.intersection([.shift, .command]).isEmpty)
                 window?.makeFirstResponder(canvasHost)
                 return nil
@@ -834,6 +838,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             }
             return event
         case .leftMouseDragged:
+            if canvasHost.isSectionGestureActive { canvasHost.updateSectionGesture(event: event); return nil }
             if canvasHost.isMarqueeSelecting {
                 canvasHost.updateMarquee(at: canvasHost.convert(event.locationInWindow, from: nil)); return nil
             }
@@ -841,6 +846,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             canvasHost.updatePanDrag(at: event.locationInWindow)
             return nil  // consume so child views don't also drag.
         case .leftMouseUp:
+            if canvasHost.isSectionGestureActive { canvasHost.endSectionGesture(); return nil }
             if canvasHost.isMarqueeSelecting { canvasHost.endMarquee(); return nil }
             guard canvasHost.isPanDragging else { return event }
             canvasHost.endPanDrag()
@@ -1305,6 +1311,7 @@ extension DocumentWindowController: NSMenuItemValidation {
         guard let item = sender as? NSMenuItem, FrameStacking.allCases.indices.contains(item.tag) else { return }
         canvasHost.restackSelection(FrameStacking.allCases[item.tag])
     }
+    @objc func createSection(_ sender: Any?) { canvasHost.createSectionFromSelection() }
     @objc func arrangeFrames(_ sender: Any?) {
         guard let item = sender as? NSMenuItem, FrameArrangement.allCases.indices.contains(item.tag) else { return }
         canvasHost.arrangeSelection(FrameArrangement.allCases[item.tag])
@@ -1342,6 +1349,9 @@ extension DocumentWindowController: NSMenuItemValidation {
         case #selector(restackFrames(_:)):
             guard FrameStacking.allCases.indices.contains(menuItem.tag) else { return false }
             return canvasActionsEnabled && canvasHost.canRestack(FrameStacking.allCases[menuItem.tag])
+        case #selector(createSection(_:)):
+            // With frames selected it wraps them; otherwise it starts drawing.
+            return canvasActionsEnabled
         case #selector(arrangeFrames(_:)):
             guard FrameArrangement.allCases.indices.contains(menuItem.tag) else { return false }
             return canvasActionsEnabled && canvasHost.canArrange(FrameArrangement.allCases[menuItem.tag])

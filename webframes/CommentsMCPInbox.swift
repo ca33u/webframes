@@ -1,5 +1,6 @@
 import AppKit
 import CryptoKit
+import ImageIO
 import os
 
 /// Local requests are applied by the open document, never by a second file writer.
@@ -7,10 +8,13 @@ import os
 @MainActor final class CommentsMCPInbox {
     static let permissionKey = "webframes.allowMCPResolveComments"
     static var isAllowed: Bool { UserDefaults.standard.bool(forKey: permissionKey) }
+    static let frameImagesPermissionKey = "webframes.allowMCPUpdateFrameImages"
+    static var areFrameImagesAllowed: Bool { UserDefaults.standard.bool(forKey: frameImagesPermissionKey) }
     /// Why the request folder could not be prepared, shown in Settings.
     private(set) static var unavailableReason: String?
     private weak var document: WebFramesDocument?
     private let permission: () -> Bool
+    private let frameImagesPermission: () -> Bool
     private var busy = false
     private var started = false
     private var directory: URL?
@@ -18,15 +22,22 @@ import os
     private var defaultsObserver: NSObjectProtocol?
 
     struct ExpectedComment: Codable { let id: String; let comment: String; let resolved: Bool }
+    struct FrameImageUpdate: Codable {
+        let frameID: String
+        let beforeHash: String
+        let dataURL: String
+    }
     struct Request: Codable {
         let id: String
         let deadline: Double
         let resolved: Bool
         let comments: [ExpectedComment]
+        var frameImage: FrameImageUpdate? = nil
     }
-    init(document: WebFramesDocument, permission: (() -> Bool)? = nil) {
+    init(document: WebFramesDocument, permission: (() -> Bool)? = nil, frameImagesPermission: (() -> Bool)? = nil) {
         self.document = document
         self.permission = permission ?? { CommentsMCPInbox.isAllowed }
+        self.frameImagesPermission = frameImagesPermission ?? { CommentsMCPInbox.areFrameImagesAllowed }
     }
     static func directory(for project: URL) -> URL {
         let canonical = project.resolvingSymlinksInPath().standardizedFileURL.path
@@ -37,7 +48,7 @@ import os
     }
 
     /// Follows the Settings opt-in: the request folder exists, and is watched,
-    /// only while agents may resolve comments. Without the folder the MCP
+    /// only while either kind of agent mutation is allowed. Without the folder the MCP
     /// server answers immediately that the setting is off.
     func start() {
         guard !started, let url = document?.fileURL else { return }
@@ -60,7 +71,7 @@ import os
     /// Starts or stops watching to match the current permission.
     func updateActivation() {
         guard started, let directory else { return }
-        if permission() {
+        if permission() || frameImagesPermission() {
             guard watcher == nil else { return }
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -89,11 +100,46 @@ import os
     }
 
     /// Validate the entire batch against current memory before changing any item.
-    static func apply(_ request: Request, to document: WebFramesDocument, allowed: Bool, now: Date = Date()) throws {
-        guard allowed else { throw ConnectionSettingsError.message("Comment changes are disabled. Enable Allow agents to resolve comments in Web Frames Settings.") }
+    static func apply(_ request: Request, to document: WebFramesDocument, allowed: Bool, imagesAllowed: Bool = false, now: Date = Date()) throws {
         guard request.deadline > now.timeIntervalSince1970, request.deadline <= now.timeIntervalSince1970 + 30 else {
             throw ConnectionSettingsError.message("Request expired. Read the comments again and retry.")
         }
+        if let update = request.frameImage {
+            guard imagesAllowed else { throw ConnectionSettingsError.message("Frame image changes are disabled. Enable Allow agents to update frame images in Web Frames Settings.") }
+            guard request.comments.isEmpty, !request.resolved,
+                  !update.frameID.isEmpty, update.frameID.count <= 200,
+                  update.beforeHash.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+                  let frame = document.workspace.frames.first(where: { $0.id == update.frameID }), frame.isImage,
+                  case .string(let previousURL)? = frame.extras["imgUrl"],
+                  let previous = imageBytes(previousURL) else {
+                throw ConnectionSettingsError.message("The image frame changed or was deleted. Read the latest frames and retry.")
+            }
+            guard update.dataURL.utf8.count <= 12_000_000,
+                  update.dataURL.hasPrefix("data:image/png;base64,") || update.dataURL.hasPrefix("data:image/jpeg;base64,"),
+                  let data = imageBytes(update.dataURL), !data.isEmpty, data.count <= 8 * 1024 * 1024,
+                  let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) == 1,
+                  let imageType = CGImageSourceGetType(source) as String?,
+                  imageType == (update.dataURL.hasPrefix("data:image/png;") ? "public.png" : "public.jpeg"),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                  width > 0, height > 0, width <= 16_384, height <= 16_384,
+                  width * height <= 32_000_000,
+                  CGImageSourceCreateImageAtIndex(source, 0, nil) != nil else {
+                throw ConnectionSettingsError.message("Provide a valid PNG or JPEG screenshot up to 8 MiB and 32 million pixels.")
+            }
+            let newHash = imageHash(data)
+            let currentHash = imageHash(previous)
+            guard currentHash == update.beforeHash || currentHash == newHash else {
+                throw ConnectionSettingsError.message("The frame image changed since it was read. Read the latest frames and retry.")
+            }
+            // A timed-out request may already have been saved. Retrying the same bytes is a no-op.
+            guard currentHash != newHash else { return }
+            document.workspace.updateAgentFrameImage(id: frame.id, dataURL: update.dataURL,
+                                                      pixelSize: CGSize(width: width, height: height), date: now)
+            return
+        }
+        guard allowed else { throw ConnectionSettingsError.message("Comment changes are disabled. Enable Allow agents to resolve comments in Web Frames Settings.") }
         let ids = request.comments.map(\.id)
         guard !ids.isEmpty, ids.count <= 100, Set(ids).count == ids.count else {
             throw ConnectionSettingsError.message("Provide 1–100 unique comment ids.")
@@ -107,6 +153,14 @@ import os
         }
         document.workspace.setAgentCommentStatuses(ids: ids, resolved: request.resolved, date: now)
     }
+    static func imageBytes(_ value: String) -> Data? {
+        guard value.hasPrefix("data:image/"), let comma = value.firstIndex(of: ","),
+              value[..<comma].hasSuffix(";base64") else { return nil }
+        return Data(base64Encoded: String(value[value.index(after: comma)...]))
+    }
+    static func imageHash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
     private func drain() {
         guard !busy, let document, let directory,
               let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey, .fileSizeKey]) else { return }
@@ -117,22 +171,31 @@ import os
             let reply = directory.appendingPathComponent(id + ".response.json")
             do {
                 let info = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey])
-                guard info.isSymbolicLink != true, (info.fileSize ?? 0) <= 128_000 else {
+                guard info.isSymbolicLink != true, (info.fileSize ?? 0) <= 12_000_000 else {
                     throw ConnectionSettingsError.message("Invalid comment request.")
                 }
                 let request = try JSONDecoder().decode(Request.self, from: Data(contentsOf: url))
+                guard request.frameImage != nil || (info.fileSize ?? 0) <= 128_000 else {
+                    throw ConnectionSettingsError.message("Invalid comment request.")
+                }
                 try FileManager.default.removeItem(at: url)
                 guard request.id == id else { throw ConnectionSettingsError.message("Invalid request id.") }
                 // Only the in-app preference grants permission. CLI arguments cannot bypass it.
-                try Self.apply(request, to: document, allowed: permission())
+                try Self.apply(request, to: document, allowed: permission(), imagesAllowed: frameImagesPermission())
                 guard let projectURL = document.fileURL else { throw ConnectionSettingsError.message("Save this project first.") }
                 busy = true
                 document.save(to: projectURL, ofType: WebFramesDocument.fileTypeIdentifier, for: .saveOperation) { [weak self] error in
                     MainActor.assumeIsolated {
                         self?.busy = false
                         defer { self?.drain() }
-                        Self.reply(error.map { ["error": "Status changed in the app but could not be saved: " + $0.localizedDescription] }
-                            ?? ["ok": true, "ids": request.comments.map(\.id), "resolved": request.resolved], to: reply)
+                        let success: [String: Any]
+                        if let update = request.frameImage, let bytes = Self.imageBytes(update.dataURL) {
+                            success = ["ok": true, "frame_id": update.frameID, "imageHash": Self.imageHash(bytes)]
+                        } else {
+                            success = ["ok": true, "ids": request.comments.map(\.id), "resolved": request.resolved]
+                        }
+                        Self.reply(error.map { ["error": "Change applied in the app but could not be saved: " + $0.localizedDescription] }
+                            ?? success, to: reply)
                     }
                 }
                 return

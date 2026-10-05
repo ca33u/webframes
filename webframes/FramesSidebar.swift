@@ -10,6 +10,9 @@ protocol FramesSidebarDelegate: AnyObject {
     func framesSidebar(_ sidebar: FramesSidebar, didReorderFrameIDs ids: [String])
     func framesSidebar(_ sidebar: FramesSidebar, didSelectFrameID id: String)
     func framesSidebar(_ sidebar: FramesSidebar, didRequest action: FramesSidebar.SourceAction, forSourceID sourceID: String)
+    /// Section row clicked: select the section's frames.
+    func framesSidebar(_ sidebar: FramesSidebar, didSelectSectionID id: String)
+    func framesSidebar(_ sidebar: FramesSidebar, didSetSectionID id: String, collapsed: Bool)
 }
 
 // MARK: - Sidebar
@@ -123,6 +126,16 @@ final class FramesSidebar: NSVisualEffectView {
     }
 
     weak var delegate: FramesSidebarDelegate?
+
+    /// Sections as the sidebar shows them: a collapsible row with the
+    /// section's frames listed under it.
+    struct SectionEntry: Equatable {
+        let id: String
+        let name: String
+        let frameIDs: [String]
+        let collapsed: Bool
+    }
+    private var sectionEntries: [SectionEntry] = []
 
     // MARK: - Views
 
@@ -322,19 +335,26 @@ final class FramesSidebar: NSVisualEffectView {
     /// workspace mutation (e.g. a drag-move, which fires `refreshNative`
     /// but doesn't change the frames array) would thrash the stack and
     /// flicker hover/highlight state on mouse-over'd rows.
-    @MainActor func setFrames(_ frames: [FrameModel], projectMap: ProjectMapSnapshot?) {
+    @MainActor func setFrames(_ frames: [FrameModel], sections: [SectionModel] = [], projectMap: ProjectMapSnapshot?) {
         let newEntries = frames.map(Entry.from(frame:))
+        let membership = SectionModel.membership(frames: frames, sections: sections)
+        let newSections = sections.map { s in
+            SectionEntry(id: s.id, name: s.name, frameIDs: frames.map(\.id).filter { membership[$0] == s.id }, collapsed: s.collapsed)
+        }
+        let sectioned = Set(newSections.flatMap(\.frameIDs))
         let newSource: SourceEntry? = projectMap.map { map in
             let source = map.effectiveWebSource
             var ids = Set(map.routes.compactMap(\.frameID))
             for frame in frames {
                 if case .string(let sourceID) = frame.extras["webSourceID"], sourceID == source.id { ids.insert(frame.id) }
             }
-            return SourceEntry(source: source, frameIDs: ids)
+            // Frames in a section are listed under the section instead.
+            return SourceEntry(source: source, frameIDs: ids.subtracting(sectioned))
         }
-        guard newEntries != entries || newSource != sourceEntry else { return }
+        guard newEntries != entries || newSource != sourceEntry || newSections != sectionEntries else { return }
         entries = newEntries
         sourceEntry = newSource
+        sectionEntries = newSections
         emptyLabel.isHidden = !entries.isEmpty || newSource != nil
         renderRows()
     }
@@ -380,30 +400,64 @@ final class FramesSidebar: NSVisualEffectView {
             v.removeFromSuperview()
         }
         var didInsertSource = false
+        var renderedSections = Set<String>()
+        let sectionOf: [String: SectionEntry] = Dictionary(
+            sectionEntries.flatMap { s in s.frameIDs.map { ($0, s) } }, uniquingKeysWith: { a, _ in a })
         for entry in entries {
+            // A section appears where its first frame would be, with its
+            // frames (in canvas order) under it.
+            if let section = sectionOf[entry.id] {
+                guard renderedSections.insert(section.id).inserted else { continue }
+                addSectionRow(section)
+                if !section.collapsed {
+                    let members = Set(section.frameIDs)
+                    for member in entries where members.contains(member.id) { addFrameRow(member, indented: true) }
+                }
+                continue
+            }
             if let sourceEntry, sourceEntry.frameIDs.contains(entry.id), !didInsertSource {
                 addSourceRow(sourceEntry)
                 didInsertSource = true
             }
             if let sourceEntry, sourceEntry.frameIDs.contains(entry.id), !sourceExpanded { continue }
-            let row = FramesSidebarRow(entry: entry)
-            row.isSourceChild = sourceEntry?.frameIDs.contains(entry.id) == true
-            row.setHighlighted(entry.id == selectedId)
-            row.reorderOwner = self
-            row.onClick = { [weak self] id in
-                guard let self else { return }
-                self.delegate?.framesSidebar(self, didSelectFrameID: id)
-            }
-            stack.addArrangedSubview(row)
-            // Each row fills the full stack width so labels can truncate
-            // middle-elided when the frame title is long — without this,
-            // NSStackView's `.leading` alignment would let each row size
-            // to its intrinsic content (which for a long title is "as
-            // wide as the text", exceeding the stack and overflowing the
-            // scroll view's horizontal axis).
-            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            addFrameRow(entry, indented: sourceEntry?.frameIDs.contains(entry.id) == true)
         }
         if let sourceEntry, !didInsertSource { addSourceRow(sourceEntry) }
+        // Empty sections (drawn, frames not dropped in yet) come last.
+        for section in sectionEntries where !renderedSections.contains(section.id) { addSectionRow(section) }
+    }
+
+    private func addSectionRow(_ section: SectionEntry) {
+        let row = FramesSidebarSectionRow(section: section)
+        row.onSelect = { [weak self] in
+            guard let self else { return }
+            self.delegate?.framesSidebar(self, didSelectSectionID: section.id)
+        }
+        row.onToggle = { [weak self] in
+            guard let self else { return }
+            self.delegate?.framesSidebar(self, didSetSectionID: section.id, collapsed: !section.collapsed)
+        }
+        stack.addArrangedSubview(row)
+        row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    }
+
+    private func addFrameRow(_ entry: Entry, indented: Bool) {
+        let row = FramesSidebarRow(entry: entry)
+        row.isSourceChild = indented
+        row.setHighlighted(entry.id == selectedId)
+        row.reorderOwner = self
+        row.onClick = { [weak self] id in
+            guard let self else { return }
+            self.delegate?.framesSidebar(self, didSelectFrameID: id)
+        }
+        stack.addArrangedSubview(row)
+        // Each row fills the full stack width so labels can truncate
+        // middle-elided when the frame title is long — without this,
+        // NSStackView's `.leading` alignment would let each row size
+        // to its intrinsic content (which for a long title is "as
+        // wide as the text", exceeding the stack and overflowing the
+        // scroll view's horizontal axis).
+        row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
     private func addSourceRow(_ entry: SourceEntry) {
@@ -455,6 +509,75 @@ final class FramesSidebar: NSVisualEffectView {
         return true
     }
 
+}
+
+// MARK: - Section row
+
+/// A section in the layers list: disclosure chevron (collapse/expand), name
+/// and frame count. Clicking the row selects the section's frames.
+final class FramesSidebarSectionRow: NSView {
+    var onSelect: (() -> Void)?
+    var onToggle: (() -> Void)?
+    private let chevron = NSButton()
+
+    init(section: FramesSidebar.SectionEntry) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        chevron.bezelStyle = .inline
+        chevron.isBordered = false
+        chevron.imagePosition = .imageOnly
+        chevron.image = NSImage(systemSymbolName: section.collapsed ? "chevron.right" : "chevron.down",
+                                accessibilityDescription: section.collapsed ? "Expand section" : "Collapse section")?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+        chevron.contentTintColor = .secondaryLabelColor
+        chevron.target = self
+        chevron.action = #selector(toggle)
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+
+        let icon = NSImageView(image: NSImage(systemSymbolName: "square.dashed", accessibilityDescription: "Section")!)
+        icon.symbolConfiguration = .init(pointSize: 13, weight: .regular)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        let name = NSTextField(labelWithString: section.name)
+        name.font = .systemFont(ofSize: 12, weight: .semibold)
+        name.textColor = WFDesign.text
+        name.lineBreakMode = .byTruncatingTail
+        name.translatesAutoresizingMaskIntoConstraints = false
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let count = NSTextField(labelWithString: "\(section.frameIDs.count)")
+        count.font = .systemFont(ofSize: 11)
+        count.textColor = .secondaryLabelColor
+        count.translatesAutoresizingMaskIntoConstraints = false
+
+        [chevron, icon, name, count].forEach(addSubview)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 28),
+            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chevron.widthAnchor.constraint(equalToConstant: 16), chevron.heightAnchor.constraint(equalToConstant: 16),
+            icon.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: 2),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16), icon.heightAnchor.constraint(equalToConstant: 16),
+            name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
+            name.centerYAnchor.constraint(equalTo: centerYAnchor),
+            name.trailingAnchor.constraint(lessThanOrEqualTo: count.leadingAnchor, constant: -6),
+            count.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            count.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Section \(section.name), \(section.frameIDs.count) frames")
+        setAccessibilityIdentifier("webframes.framesSidebar.section.\(section.id)")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func toggle() { onToggle?() }
+    override func mouseUp(with event: NSEvent) {
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { onSelect?() }
+    }
 }
 
 // MARK: - Web source row

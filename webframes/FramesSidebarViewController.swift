@@ -78,7 +78,7 @@ final class FramesSidebarViewController: NSViewController {
         guard let document else { return }
         workspaceSubscription = document.workspace.observe { [weak self] in
             guard let self, let doc = self.document else { return }
-            self.sidebar.setFrames(doc.workspace.frames, projectMap: doc.workspace.projectMap)
+            self.sidebar.setFrames(doc.workspace.frames, sections: doc.workspace.sections, projectMap: doc.workspace.projectMap)
         }
     }
 }

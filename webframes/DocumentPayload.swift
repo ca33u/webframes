@@ -54,6 +54,10 @@ struct DocumentPayload: Codable, Equatable {
     var projectMap: ProjectMapSnapshot?
     var fixSource: FixSourceReference?
 
+    /// `[{ id, name, frameIds, collapsed? }]` — named groups of frames.
+    /// Optional so files without sections decode and are written unchanged.
+    var sections: [JSONValue]?
+
     static let empty = DocumentPayload()
 }
 
@@ -158,6 +162,7 @@ extension DocumentPayload {
         ]
         if let fixSource, let data = try? JSONEncoder().encode(fixSource),
            let value = try? JSONSerialization.jsonObject(with: data) { result["fixSource"] = value }
+        if let sections, !sections.isEmpty { result["sections"] = sections.map(\.foundation) }
         if let projectMap, let data = try? JSONEncoder().encode(projectMap),
            let value = try? JSONSerialization.jsonObject(with: data) { result["projectMap"] = value }
         return result
@@ -179,6 +184,7 @@ extension DocumentPayload {
         self.annotations = (dict["annotations"] as? [Any])?.map(JSONValue.from) ?? []
         self.links       = (dict["links"] as? [Any])?.map(JSONValue.from) ?? []
         self.canvas      = dict["canvas"].map(JSONValue.from) ?? .null
+        self.sections    = (dict["sections"] as? [Any])?.map(JSONValue.from)
         if let raw = dict["fixSource"], JSONSerialization.isValidJSONObject(raw),
            let data = try? JSONSerialization.data(withJSONObject: raw) {
             self.fixSource = try? JSONDecoder().decode(FixSourceReference.self, from: data)

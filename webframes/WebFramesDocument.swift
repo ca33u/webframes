@@ -468,6 +468,10 @@ extension WebFramesDocument: WorkspaceStoreDelegate {
             }
             undoManager.setActionName("Delete Link")
 
+        case .frameImageUpdated(let previous):
+            undoManager.registerUndo(withTarget: self) { $0.workspace.restoreFrameImage(previous) }
+            undoManager.setActionName("Update Frame Image")
+
         case .imagesReplaced(let frames, let annotations):
             undoManager.registerUndo(withTarget: self) { doc in
                 doc.workspace.restoreImages(frames: frames, annotations: annotations)
@@ -502,7 +506,11 @@ extension WebFramesDocument: WorkspaceStoreDelegate {
             undoManager.registerUndo(withTarget: self) { $0.workspace.moveFrame(id: id, to: origin) }
             undoManager.setActionName("Move Frames")
 
-        case .frameResized, .frameRenamed,
+        case .sectionsChanged(let previous, let action):
+            undoManager.registerUndo(withTarget: self) { $0.workspace.restoreSections(previous, action: action) }
+            undoManager.setActionName(action)
+
+        case .frameResized, .frameRenamed, .sectionCollapseChanged,
              .viewportChanged, .countersReset, .projectMapChanged:
             // Non-undoable by design. Matches JS `undoStack` which only
             // stores deletions. Viewport changes are continuous-gesture

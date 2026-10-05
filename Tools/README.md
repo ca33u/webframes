@@ -4,13 +4,16 @@ Compare and Fix comments run through a coding agent chosen in **Settings → Cod
 
 ## Comments MCP for Codex and Claude Code
 
-`comments-mcp.mjs` is a separate, read-only-by-default MCP server for the comments saved in Web Frames projects. It exposes five tools:
+`comments-mcp.mjs` is a separate, read-only-by-default MCP server for the comments and frames saved in Web Frames projects. It exposes eight tools:
 
 - `list_projects` — find saved Web Frames projects and unresolved counts.
 - `list_comments` — read the unresolved or resolved list with frame, URL, viewport, selector, and source-root context.
 - `get_comment` — read one full comment and return its attached screenshot when available.
 - `get_agent_brief` — produce a compact implementation brief for a coding agent.
 - `set_comment_status` — resolve or reopen comments in an open project; off until **Allow agents to resolve comments** is enabled (see below).
+- `list_frames` — list frame ids, types, dimensions and current image hashes.
+- `get_frame` — inspect a frame and its current image, including an updated screenshot.
+- `update_frame_image` — replace one existing image frame with a captured PNG/JPEG; off until **Allow agents to update frame images** is enabled.
 
 In **Settings → Claude · MCP**, use **Copy Desktop config** or **Copy Code command**. Generated configuration points to Node and the read-only MCP helper inside the installed Web Frames app; no separate Node installation is needed. Install Web Frames in Applications before copying this configuration.
 
@@ -36,6 +39,22 @@ A single reviewed operation is limited to 8 existing files, 8 replacements per f
 
 `set_comment_status` accepts `{ "project": "project-id", "ids": ["comment-id"], "resolved": true }`.
 Use `false` to reopen. Permission is off by default and checked on every request. Keep the project open in Web Frames. A deleted or edited comment rejects the whole batch; read comments again before retrying. The request inbox is under `~/Library/Application Support/Web Frames/MCP Requests/` in per-project directories with owner-only permissions. This is same-user local IPC, not a remotely exposed service.
+
+## Updated simulator screenshots
+
+Enable **Settings → Claude · MCP → Allow agents to update frame images** and keep the Web Frames project open. This is separate from permission to resolve comments; both are off by default.
+
+The external coding agent builds and launches the application using its own tools, opens the intended screen in its simulator/emulator and captures a screenshot. It then calls:
+
+```json
+{"project":"project-id","frame_id":"frame-id","image_path":"/absolute/path/to/screen.png"}
+```
+
+Pass these arguments to `update_frame_image`. Find `frame_id` through `list_frames` or `frame.id` in a comment. PNG and JPEG files are accepted up to 8 MiB, 16,384 pixels per side and 32 million pixels total. The MCP server copies the file bytes into a bounded request, so Web Frames does not need access to a temporary simulator path. The app validates the image and the existing frame's byte hash, updates the open document and confirms only after saving. A changed or deleted frame rejects the request; read its current state before retrying. Identical image retries do not duplicate undo history. If confirmation times out, use `get_frame` to check the saved image before retrying.
+
+The frame keeps its id, label, position, size, comments and links. Other frames sharing the old image remain unchanged. Original comment screenshots are retained as before evidence: `get_comment` reads those; `get_frame` reads current frame pixels. Updates record `imageUpdatedBy`/`imageUpdatedAt` and support **Undo Update Frame Image**. Updating pixels does not resolve comments. Verify the resulting screen before separately calling `set_comment_status` when allowed.
+
+This first version receives prepared screenshots. The built-in Fix connector does not run builds or control simulators. Reproducible screen bindings, sequential batch refresh using one emulator and optional streaming of the selected frame are planned.
 
 ## Start
 

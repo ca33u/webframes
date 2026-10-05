@@ -169,6 +169,15 @@ enum AppMenu {
             item.tag = index
             arrangeMenu.addItem(item)
         }
+        arrangeMenu.addItem(.separator())
+        // Figma: sections name a group of frames for you and the agent.
+        // ⇧S as in Figma; like the other single-key canvas shortcuts it is
+        // disabled while text or a web page has focus (validateMenuItem).
+        let section = NSMenuItem(title: "Create Section",
+                                 action: #selector(DocumentWindowController.createSection(_:)),
+                                 keyEquivalent: "s")
+        section.keyEquivalentModifierMask = [.shift]
+        arrangeMenu.addItem(section)
         arrangeItem.submenu = arrangeMenu
 
         // Window
