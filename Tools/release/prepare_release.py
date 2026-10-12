@@ -23,13 +23,18 @@ def main():
     parser.add_argument('app', type=Path)
     parser.add_argument('output', type=Path, help='A new, empty release directory')
     parser.add_argument('--notary-profile', help='Existing notarytool Keychain profile; never pass a password')
+    parser.add_argument('--offline', action='store_true', help='Local draft only: no Apple timestamp or notarization requests')
     args = parser.parse_args()
+    if args.offline and args.notary_profile:
+        parser.error('--offline cannot be combined with --notary-profile')
     app = args.app.resolve()
     output = args.output.resolve()
     info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
     if info.get('CFBundleIdentifier') != 'app.essazanov.webframes': raise ValueError('Not a Web Frames build')
     result = subprocess.run(['codesign', '-dv', '--verbose=4', str(app)], text=True, capture_output=True, check=True)
-    if 'Authority=Developer ID Application:' not in result.stderr or 'Timestamp=' not in result.stderr:
+    if 'Authority=Developer ID Application:' not in result.stderr:
+        raise ValueError('Requires a Developer ID application signature; Apple Development is not distributable')
+    if not args.offline and 'Timestamp=' not in result.stderr:
         raise ValueError('Requires a timestamped Developer ID application signature')
     entitlements = plistlib.loads(run('codesign', '-d', '--entitlements', '-', '--xml', app).encode())
     if entitlements.get('com.apple.security.get-task-allow'):
@@ -47,11 +52,12 @@ def main():
     version = framework / 'Versions/B'
     for code in [version / 'Autoupdate', version / 'Updater.app',
                  *sorted((version / 'XPCServices').glob('*.xpc')), framework, installed]:
-        run('codesign', '--force', '--sign', identity, '--timestamp', '--options', 'runtime',
+        run('codesign', '--force', '--sign', identity, '--timestamp=none' if args.offline else '--timestamp', '--options', 'runtime',
             '--preserve-metadata=identifier,entitlements', code)
     run('codesign', '--verify', '--deep', '--strict', installed)
     (stage / 'Applications').symlink_to('/Applications')
-    (stage / 'Start Here.txt').write_text(f'''Web Frames — Apple Silicon, macOS {info['LSMinimumSystemVersion']} or later
+    draft_notice = 'LOCAL-ONLY draft: no secure timestamp or notarization. Do not distribute.\n\n' if args.offline else ''
+    (stage / 'Start Here.txt').write_text(draft_notice + f'''Web Frames — Apple Silicon, macOS {info['LSMinimumSystemVersion']} or later
 
 1. Drag Web Frames into Applications.
 2. Open it and create a project, or open an existing .webframes document.
@@ -75,7 +81,7 @@ image frame; Undo restores its previous image.
 Check for Updates is in the Web Frames menu.
 ''')
     name = f"WebFrames-{info['CFBundleShortVersionString']}-{info['CFBundleVersion']}-arm64"
-    status = 'notarized' if args.notary_profile else 'NOT-NOTARIZED'
+    status = 'LOCAL-ONLY-NOT-NOTARIZED' if args.offline else 'notarized' if args.notary_profile else 'NOT-NOTARIZED'
     archive = output / (name + '-' + status + '.zip')
     if args.notary_profile:
         submission = output / 'NotarizationSubmission.zip'
@@ -89,7 +95,7 @@ Check for Updates is in the Web Frames menu.
     dmg = output / (name + '-' + status + '.dmg')
     run('hdiutil', 'create', '-volname', 'Web Frames', '-srcfolder', stage, '-format', 'UDZO', dmg)
     # Use the same verified team identity as the application.
-    run('codesign', '--sign', identity, '--timestamp', dmg)
+    run('codesign', '--sign', identity, '--timestamp=none' if args.offline else '--timestamp', dmg)
     if args.notary_profile:
         notarize(dmg, args.notary_profile)
         run('xcrun', 'stapler', 'staple', dmg)
@@ -98,11 +104,15 @@ Check for Updates is in the Web Frames menu.
     metadata = {'version': info['CFBundleShortVersionString'], 'build': info['CFBundleVersion'],
                 'architecture': 'arm64', 'minimumMacOS': info['LSMinimumSystemVersion'],
                 'notarized': bool(args.notary_profile), 'published': False,
+                'offlineDraft': args.offline, 'readyForDistribution': bool(args.notary_profile),
+                'requires': ['secure timestamp', 'Apple notarization'] if args.offline else [] if args.notary_profile else ['Apple notarization'],
                 'xcode': info.get('DTXcodeBuild', ''), 'toolchain': run('xcodebuild', '-version').replace('\n', ' · '),
                 'sdk': info.get('DTSDKName', ''),
                 'artifacts': {p.name: {'sha256': hashlib.sha256(p.read_bytes()).hexdigest(), 'bytes': p.stat().st_size} for p in (archive, dmg)}}
     (output / 'release.json').write_text(json.dumps(metadata, indent=2) + '\n')
     print('Prepared installer: ' + str(dmg))
-    print('Ready for public distribution.' if args.notary_profile else 'NOT READY FOR PUBLIC DISTRIBUTION: Apple notarization is still required.')
+    print('Ready for public distribution.' if args.notary_profile else
+          'NOT READY FOR PUBLIC DISTRIBUTION: secure timestamp and Apple notarization are still required.' if args.offline else
+          'NOT READY FOR PUBLIC DISTRIBUTION: Apple notarization is still required.')
 
 if __name__ == '__main__': main()

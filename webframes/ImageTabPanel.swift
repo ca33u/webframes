@@ -3,6 +3,60 @@ import Network
 import os
 import UniformTypeIdentifiers
 
+/// Plain-text recipe editor shared by imported images and frozen snapshots.
+final class ScreenRecipeEditor: NSView {
+    private let flowView = NSTextView()
+    private let deeplinkField = NSTextField()
+    var flow: String { flowView.string }
+    var deeplink: String { deeplinkField.stringValue }
+
+    init(flow: String?, deeplink: String?) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+        let flowLabel = NSTextField(labelWithString: "Flow (YAML or file path)")
+        let linkLabel = NSTextField(labelWithString: "Deeplink (optional)")
+        let hint = NSTextField(wrappingLabelWithString: "Use a path relative to the source project or paste the runner’s YAML. Leave fields empty to remove the recipe.")
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = .secondaryLabelColor
+        flowView.isRichText = false
+        flowView.isAutomaticQuoteSubstitutionEnabled = false
+        flowView.isAutomaticDashSubstitutionEnabled = false
+        flowView.isAutomaticTextReplacementEnabled = false
+        flowView.isAutomaticSpellingCorrectionEnabled = false
+        flowView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        flowView.string = flow ?? ""
+        flowView.setAccessibilityLabel("Flow YAML or file path")
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        scroll.documentView = flowView
+        flowView.isVerticallyResizable = true
+        flowView.isHorizontallyResizable = false
+        flowView.autoresizingMask = [.width]
+        flowView.textContainer?.widthTracksTextView = true
+        flowView.frame = NSRect(x: 0, y: 0, width: 458, height: 160)
+        deeplinkField.placeholderString = "myapp://screen"
+        deeplinkField.stringValue = deeplink ?? ""
+        deeplinkField.setAccessibilityLabel("Deeplink")
+        let stack = NSStackView(views: [flowLabel, scroll, linkLabel, deeplinkField, hint])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scroll.widthAnchor.constraint(equalTo: widthAnchor),
+            scroll.heightAnchor.constraint(equalToConstant: 160),
+            deeplinkField.widthAnchor.constraint(equalTo: widthAnchor),
+            hint.widthAnchor.constraint(equalTo: widthAnchor),
+        ])
+    }
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+}
+
 // MARK: - ImageTabPanel
 
 final class ImageTabPanel: NSView, AddFrameTabPanel {

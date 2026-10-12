@@ -504,6 +504,10 @@ private final class ProjectRowView: NSView {
         wantsLayer = true
         layer?.cornerRadius = WFDesign.Radius.medium
         layer?.borderWidth = 1
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(entry.displayName)
+        setAccessibilityHelp("Open project")
 
         nameLabel.stringValue = entry.displayName
         nameLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
@@ -596,6 +600,12 @@ private final class ProjectRowView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         guard bounds.contains(point) else { return }
         owner?.open(entry)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard let owner else { return false }
+        owner.open(entry)
+        return true
     }
 
     @objc private func deletePressed(_ sender: Any?) {

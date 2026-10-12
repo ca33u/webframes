@@ -205,7 +205,12 @@ final class WebFramesDocument: NSDocument {
     /// file does not exist triggers NSDocument's ownership/safety alert.
     /// Delay it until the first edit so untouched windows create no files.
     private func markWorkspaceChanged() {
-        updateChangeCount(.changeDone)
+        // NSDocument tracks Undo/Redo from the undo manager notifications.
+        // Counting the inverse mutation as a new edit cancels AppKit's Undo
+        // change count after a save, leaving changed pixels "clean" on disk.
+        if undoManager?.isUndoing != true && undoManager?.isRedoing != true {
+            updateChangeCount(.changeDone)
+        }
         guard needsInitialManagedSave, !initialManagedSaveInFlight,
               !windowControllers.isEmpty, let url = fileURL else { return }
         initialManagedSaveInFlight = true
@@ -471,6 +476,12 @@ extension WebFramesDocument: WorkspaceStoreDelegate {
         case .frameImageUpdated(let previous):
             undoManager.registerUndo(withTarget: self) { $0.workspace.restoreFrameImage(previous) }
             undoManager.setActionName("Update Frame Image")
+
+        case .frameScreenRecipeChanged(let previous):
+            undoManager.registerUndo(withTarget: self) {
+                $0.workspace.setFrameScreenRecipe(id: previous.id, flow: previous.flow, deeplink: previous.deeplink)
+            }
+            undoManager.setActionName("Edit Screen Flow")
 
         case .imagesReplaced(let frames, let annotations):
             undoManager.registerUndo(withTarget: self) { doc in

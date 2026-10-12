@@ -1,5 +1,8 @@
 # Building and distributing Web Frames
 
+For a local, verified source archive for GitHub, see [Public source preparation](public_source.md).
+It never commits or uploads; publication requires separate owner approval.
+
 The installable build targets Apple Silicon and macOS 15.0+. Node 22.23.2,
 the Codex connector, Comments MCP and the locked component preview dependencies
 ship inside the app. Users do not need a terminal to connect Codex.
@@ -61,6 +64,37 @@ Credentials stay in Keychain. The script never uploads to webframes.pro.
 Without a profile it produces clearly named **NOT-NOTARIZED** draft artifacts.
 Those are for preparation only and must not be promoted as a public release.
 No Gatekeeper bypass instructions are included.
+
+## Offline preflight (no Apple submissions or timestamps)
+
+Use the existing pinned Sparkle package cache and prepared runtime dependencies.
+Build a separate product from this checkout with `CODE_SIGN_STYLE=Manual`, the
+Developer ID identity, `OTHER_CODE_SIGN_FLAGS=--timestamp=none` and
+`WEBFRAMES_OFFLINE_SIGNING=YES`. Disable package updates/resolution and point
+`-clonedSourcePackagesDirPath` at the existing cache; a missing cache must be
+prepared separately. Release configuration alone does not select Developer ID:
+an ordinary build/test can replace it with an Apple Development signature.
+Recheck the identity of the exact product every time it is handed off.
+
+```sh
+python3 Tools/release/prepare_release.py '/path/Web Frames.app' \
+  '/path/to/new/offline-directory' --offline
+```
+
+Offline mode rejects a notarization profile, signs nested Sparkle helpers and
+the installer locally with `--timestamp=none`, and marks the ZIP/DMG, installer
+instructions and manifest as **LOCAL-ONLY / NOT-NOTARIZED**. It never calls
+notarytool, stapler or Gatekeeper assessment. This draft cannot be distributed:
+rebuild/sign with secure timestamps and notarize only after owner approval.
+The normal release path continues to require a timestamped Developer ID input.
+
+```sh
+python3 -m unittest discover -s Tools/release -p 'test_*.py'
+```
+
+These offline tests intercept all system commands and cover source export,
+signing/draft labels, backup-key matching, increasing builds, signature and
+notarization gates, and refusal to replace an existing update archive.
 
 ## Website and updates
 

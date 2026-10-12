@@ -1,5 +1,6 @@
 import Foundation
 import os
+import CryptoKit
 
 nonisolated enum ConnectionProvider: String, CaseIterable, Sendable {
     case github, openai, anthropic, gemini
@@ -190,7 +191,12 @@ nonisolated struct ClaudeMCPConfiguration {
     let scriptPath: String
     let projectPath: String?
     var serverName: String {
-        projectPath.map { "webframes-" + URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent.lowercased() } ?? "webframes"
+        guard let projectPath else { return "webframes" }
+        let label = URL(fileURLWithPath: projectPath).deletingPathExtension().lastPathComponent.lowercased()
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-_")
+        let safe = String(label.unicodeScalars.map { allowed.contains($0) ? Character(String($0)) : "-" }.prefix(48))
+        let digest = SHA256.hash(data: Data(projectPath.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
+        return "webframes-\(safe)-\(digest)"
     }
     var arguments: [String] { [scriptPath] + (projectPath.map { ["--project", $0] } ?? []) }
     func desktopJSON() throws -> String {

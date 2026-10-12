@@ -6,6 +6,25 @@ with DOM context, and hand them to Codex or Claude Code for fixes you review
 before anything is written.
 
 Download the signed build at [webframes.pro](https://www.webframes.pro).
+Current release: **1.1.7 (12)**, Developer ID signed and Apple notarized.
+See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes.
+
+## What you can do
+
+- Inspect live web pages, localhost routes and component previews on one canvas.
+- Pin comments to elements or screenshot regions, then review an agent's patch
+  before Apply. Undo restores the previous source.
+- Collect variants in a section, choose the reference yourself and give the
+  section a task for your coding agent.
+- Connect a local MCP client with the setup wizard. Comment status and screenshot
+  updates require separate permissions, both off by default.
+- Store a screen flow and deeplink on an image frame. Your external agent can
+  run the flow and replace that frame's screenshot; Undo and saved boards retain
+  the image you choose. Web Frames does not control an emulator itself.
+- Align frames with magnetic guides and import screenshot batches as a grid.
+
+Component previews depend on the project's providers and sample data. Server
+authentication and database access may need a mock or the project's live page.
 
 ## Requirements
 
@@ -54,9 +73,11 @@ folder. See `webframes/DocumentPackage.swift`.
 
 ## Security
 
-Agents get a bounded, read-only snapshot of your source; only the Apply button
-in Web Frames writes files. See [SECURITY.md](SECURITY.md) to report a
-vulnerability.
+Built-in Compare and Fix give the agent a bounded, read-only source snapshot;
+the Apply button writes the reviewed patch. External MCP clients can read board
+context and, with your explicit settings, change comment status or frame images.
+The MCP server never writes your source files. See [SECURITY.md](SECURITY.md)
+to report a vulnerability.
 
 ## License
 

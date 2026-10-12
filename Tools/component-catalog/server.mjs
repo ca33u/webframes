@@ -13,6 +13,9 @@ import {previewBoundaries} from './preview-boundaries.mjs';
 import {validExamples} from './client/preview-data.mjs';
 const runtime=path.dirname(fileURLToPath(import.meta.url));
 const root=fs.realpathSync(process.argv[2]||process.cwd());
+// PostCSS tools such as Tailwind resolve automatic source discovery from cwd.
+// Match the native launch even when the manual helper is started elsewhere.
+process.chdir(root);
 const requestedPort=Number(process.argv[3]||4319);
 if(!Number.isInteger(requestedPort)||requestedPort<1024||requestedPort>65535)throw Error('Use a port from 1024 to 65535.');
 // The app derives the port from the project path; another project or an
@@ -50,7 +53,7 @@ const fallbackRequire=createRequire(import.meta.url);
 const resolvePackage=name=>{try{return projectRequire.resolve(name+'/package.json')}catch{return fallbackRequire.resolve(name+'/package.json')}};
 const reactRoot=path.dirname(resolvePackage('react')), domRoot=path.dirname(resolvePackage('react-dom'));
 const server=await createServer({
-  configFile:false,root:path.join(runtime,'client'),envDir:cache,cacheDir:path.join(cache,'vite'),
+  configFile:false,root:path.join(runtime,'client'),publicDir:path.join(root,'public'),envDir:cache,cacheDir:path.join(cache,'vite'),
   plugins:[previewBoundaries(root),react({exclude:[/\/client\/catalog\.jsx$/, /\/client\/preview\.jsx$/]}),{
     name:'webframes-registry',
     resolveId(id){if(id.startsWith('virtual:webframes/'))return '\0'+id;},

@@ -30,6 +30,11 @@ struct CodexCommentContext: Codable, Equatable {
     var area: String? = nil
     /// Name of the section (named group of frames) the comment's frame is in.
     var section: String? = nil
+    var sectionTask: String? = nil
+    var referenceFrameID: String? = nil
+    var referenceLabel: String? = nil
+    var referenceStatus: String? = nil
+    var referenceScreenshotIndex: Int? = nil
 }
 
 struct CodexCommentFixPatchEntry {
@@ -224,14 +229,24 @@ enum CodexCommentContextBuilder {
         let membership = SectionModel.membership(frames: frames, sections: sections)
         let sectionNames = Dictionary(uniqueKeysWithValues: sections.map { ($0.id, $0.name) })
         let openFrameIDs = Set(annotations.filter { !$0.resolved }.map(\.frameId))
-        for frame in frames where openFrameIDs.contains(frame.id) {
-            if images.count < 5, let png = frameScreenshots[frame.id] {
-                imageIndices[frame.id] = images.count
+        let openSectionIDs = Set(openFrameIDs.compactMap { membership[$0] })
+        let references = sections.filter { openSectionIDs.contains($0.id) }.compactMap { s in
+            s.referenceFrameID.flatMap { membership[$0] == s.id ? $0 : nil }
+        }
+        let imageFrameIDs = references + frames.filter { openFrameIDs.contains($0.id) }.map(\.id)
+        for id in imageFrameIDs where imageIndices[id] == nil {
+            if images.count < 5, let png = frameScreenshots[id] {
+                imageIndices[id] = images.count
                 images.append(png)
             }
         }
         let comments = annotations.filter { !$0.resolved }.map { annotation in
             let frame = frames.first(where: { $0.id == annotation.frameId })
+            let section = sections.first { $0.id == membership[annotation.frameId] }
+            let referenceID = section?.referenceFrameID
+            let reference = referenceID.flatMap { id in
+                membership[id] == section?.id ? frames.first { $0.id == id } : nil
+            }
             let element = object(annotation.extras["element"])
             let screenshot = string(element?["screenshot"])
             let screenshotIndex: Int?
@@ -259,7 +274,12 @@ enum CodexCommentContextBuilder {
                 projectName: projectName,
                 xPct: Double(annotation.xPct), yPct: Double(annotation.yPct),
                 area: annotation.areaSummary,
-                section: membership[annotation.frameId].flatMap { sectionNames[$0] }
+                section: membership[annotation.frameId].flatMap { sectionNames[$0] },
+                sectionTask: section?.task,
+                referenceFrameID: referenceID,
+                referenceLabel: reference?.label,
+                referenceStatus: section == nil ? nil : reference != nil ? "available" : referenceID == nil ? "not_selected" : "unavailable",
+                referenceScreenshotIndex: reference.flatMap { imageIndices[$0.id] }
             )
         }
         return (comments, images)

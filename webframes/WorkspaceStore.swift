@@ -271,6 +271,27 @@ final class WorkspaceStore {
         finish(.sectionsChanged(previous: previous, action: "Rename Section"))
     }
 
+    func referenceFrame(in section: SectionModel) -> FrameModel? {
+        guard let id = section.referenceFrameID, sectionMembership[id] == section.id else { return nil }
+        return frame(id: id)
+    }
+
+    func setSectionReference(id: String, frameID: String?) {
+        guard let i = sections.firstIndex(where: { $0.id == id }), sections[i].referenceFrameID != frameID else { return }
+        if let frameID, sectionMembership[frameID] != id { return }
+        let previous = sections
+        sections[i].referenceFrameID = frameID
+        finish(.sectionsChanged(previous: previous, action: "Set Section Reference"))
+    }
+
+    func setSectionTask(id: String, task: String) {
+        let value = task.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let i = sections.firstIndex(where: { $0.id == id }), sections[i].task != value else { return }
+        let previous = sections
+        sections[i].task = value
+        finish(.sectionsChanged(previous: previous, action: "Edit Section Task"))
+    }
+
     /// Moves or resizes a section's area. Moving its frames is the caller's
     /// job (see CanvasHost), grouped into the same undo step.
     func setSectionRect(id: String, rect: CGRect, action: String) {
@@ -397,6 +418,24 @@ final class WorkspaceStore {
         guard frames[idx].label != label else { return }
         frames[idx].label = label
         finish(.frameRenamed(id: id))
+    }
+
+    /// Stores recipe text only. Execution belongs to the external agent.
+    func setFrameScreenRecipe(id: String, flow: String?, deeplink: String?) {
+        guard let i = frames.firstIndex(where: { $0.id == id }), frames[i].isImage else { return }
+        func normalized(_ value: String?) -> String? {
+            let text = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return text.isEmpty ? nil : text
+        }
+        // YAML indentation and trailing newlines can be significant (block
+        // scalars). Only use trimming to detect an empty recipe.
+        let flow = normalized(flow) == nil ? nil : flow
+        let deeplink = normalized(deeplink)
+        guard frames[i].flow != flow || frames[i].deeplink != deeplink else { return }
+        let previous = frames[i]
+        frames[i].flow = flow
+        frames[i].deeplink = deeplink
+        finish(.frameScreenRecipeChanged(previous: previous))
     }
 
     /// Deletes a frame *and* cascades: removes annotations belonging to
@@ -735,6 +774,7 @@ enum WorkspaceMutation {
     case linkBendsChanged(previous: LinkModel)
     case imagesReplaced(previousFrames: [FrameModel], previousAnnotations: [AnnotationModel])
     case frameImageUpdated(previous: FrameModel)
+    case frameScreenRecipeChanged(previous: FrameModel)
     case annotationCreated(AnnotationModel)
     case annotationUpdated(id: String, previous: AnnotationModel)
     case annotationResolvedToggled(id: String, wasResolved: Bool)

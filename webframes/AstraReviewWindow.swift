@@ -446,8 +446,12 @@ final class AstraReviewWindow: NSWindowController, NSWindowDelegate {
         guard task == nil, let project else { return }
         do {
             let workspace = try workspaceForProject()
-            let frameIDs = Set(open.map(\.frameId))
             let frames = project.workspace.frames
+            let membership = project.workspace.sectionMembership
+            let openSections = Set(open.compactMap { membership[$0.frameId] })
+            let references = project.workspace.sections.filter { openSections.contains($0.id) }
+                .compactMap { project.workspace.referenceFrame(in: $0)?.id }
+            let frameIDs = Set(open.map(\.frameId) + references)
             let screenshots = try CodexCommentImages.make(frames: frames.filter { frameIDs.contains($0.id) && $0.isImage })
             let context = CodexCommentContextBuilder.make(annotations: open, frames: frames,
                 sections: project.workspace.sections,

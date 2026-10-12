@@ -43,6 +43,7 @@ import WebKit
         let undo = try #require(doc.undoManager)
         undo.groupsByEvent = false; undo.disableUndoRegistration()
         doc.workspace.createFrame(frame("f", oldURL)); doc.workspace.createFrame(frame("other", oldURL))
+        doc.workspace.setFrameScreenRecipe(id: "f", flow: "flows/login.yaml", deeplink: "comin://login")
         doc.workspace.createLink(LinkModel(id: "link", fromId: "f", fromSide: .right, toId: "other", toSide: .left))
         doc.workspace.createAnnotation(AnnotationModel(id: "a", num: 1, frameId: "f", xPct: 20, yPct: 30,
             color: "blue", comment: "Fix spacing", resolved: false, edits: [:],
@@ -56,6 +57,7 @@ import WebKit
         #expect(updated.w == original.w && updated.h == original.h && updated.label == original.label)
         #expect(updated.extras["imgUrl"] == .string(newURL))
         #expect(updated.extras["natW"] == .number(12) && updated.extras["natH"] == .number(24))
+        #expect(updated.flow == original.flow && updated.deeplink == original.deeplink)
         #expect(updated.filePath == nil && updated.extras["imageUpdatedBy"] == .string("MCP agent"))
         #expect(doc.workspace.frames[1].extras["imgUrl"] == .string(oldURL))
         #expect(doc.workspace.annotations == comments && doc.workspace.links == links)
@@ -65,11 +67,14 @@ import WebKit
         // Changes made after the image update must survive image Undo.
         undo.disableUndoRegistration()
         doc.workspace.moveFrame(id: "f", to: CGPoint(x: 100, y: 200))
+        doc.workspace.setFrameScreenRecipe(id: "f", flow: "flows/recovery.yaml", deeplink: nil)
         doc.workspace.updateAnnotation(id: "a", comment: "Check the result", color: nil, edits: nil)
         undo.enableUndoRegistration()
         undo.undo()
         #expect(doc.workspace.frames[0].extras["imgUrl"] == .string(oldURL))
         #expect(doc.workspace.frames[0].filePath == original.filePath)
+        #expect(doc.workspace.frames[0].flow == "flows/recovery.yaml")
+        #expect(doc.workspace.frames[0].deeplink == nil)
         #expect(doc.workspace.frames[0].x == 100 && doc.workspace.annotations[0].comment == "Check the result")
         undo.redo()
         #expect(doc.workspace.frames[0].extras["imgUrl"] == .string(newURL))
@@ -101,6 +106,113 @@ import WebKit
         #expect(throws: (any Error).self) { try CommentsMCPInbox.apply(request(old, newURL, frameID: "live"), to: doc, allowed: false, imagesAllowed: true) }
         try CommentsMCPInbox.apply(request(old, dataURL(try pixels(.blue, jpeg: true), jpeg: true)), to: doc, allowed: false, imagesAllowed: true)
         #expect(doc.workspace.frames[0].extras["imgUrl"] != .string(dataURL(old)))
+    }
+
+    @Test func savedImageUpdateUndoAndRedoSurviveAutosaveAndReopen() async throws {
+        let doc = makeTestDocument(); defer { close(doc) }
+        let old = try pixels(.red), oldURL = dataURL(old), newURL = dataURL(try pixels(.blue))
+        let undo = try #require(doc.undoManager)
+        undo.disableUndoRegistration()
+        doc.workspace.createFrame(frame("f", oldURL))
+        doc.workspace.createFrame(frame("other", oldURL))
+        doc.workspace.setFrameScreenRecipe(id: "f", flow: "appId: app.essazanov.Comin\n---\n- launchApp\n- tapOn: Забыли пароль?", deeplink: "comin://login")
+        doc.workspace.createLink(LinkModel(id: "link", fromId: "f", fromSide: .right, toId: "other", toSide: .left))
+        doc.workspace.createAnnotation(AnnotationModel(id: "a", num: 1, frameId: "f", xPct: 20, yPct: 30,
+            color: "blue", comment: "Original evidence", resolved: false, edits: [:],
+            extras: ["element": .object(["screenshot": .string(oldURL)])]))
+        undo.enableUndoRegistration()
+        let url = try #require(doc.fileURL)
+        func save() async throws {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                doc.save(to: url, ofType: WebFramesDocument.fileTypeIdentifier, for: .saveOperation) { error in
+                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                }
+            }
+        }
+        try await save()
+        // Match an opened project, so Cmd+S takes the real autosave path.
+        try doc.read(from: FileWrapper(url: url), ofType: WebFramesDocument.fileTypeIdentifier)
+        NSDocumentController.shared.addDocument(doc)
+        doc.makeWindowControllers()
+        let original = doc.workspace.frames[0], comments = doc.workspace.annotations, links = doc.workspace.links
+        try CommentsMCPInbox.apply(request(old, newURL), to: doc, allowed: false, imagesAllowed: true)
+        try await save() // The MCP inbox explicitly saves before acknowledging the update.
+        try await Task.sleep(for: .milliseconds(200)) // Let AppKit close the event's undo group.
+        for isUndo in [true, false] {
+            if isUndo { undo.undo() } else { undo.redo() }
+            try await Task.sleep(for: .milliseconds(200))
+            let expected = isUndo ? oldURL : newURL
+            #expect(doc.workspace.frames[0].extras["imgUrl"] == .string(expected))
+            #expect(doc.hasUnautosavedChanges)
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                doc.autosave(withImplicitCancellability: false) { error in
+                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                }
+            }
+            let reopened = try WebFramesDocument(contentsOf: url, ofType: WebFramesDocument.fileTypeIdentifier)
+            defer { close(reopened) }
+            let restored = try #require(reopened.workspace.frames.first)
+            #expect(restored.extras["imgUrl"] == .string(expected))
+            #expect(restored.id == original.id && restored.x == original.x && restored.y == original.y)
+            #expect(restored.w == original.w && restored.h == original.h && restored.label == original.label)
+            #expect(restored.flow == original.flow && restored.deeplink == original.deeplink)
+            #expect(reopened.workspace.annotations == comments && reopened.workspace.links == links)
+            #expect(restored.extras["imageUpdatedBy"] == (isUndo ? nil : .string("MCP agent")))
+        }
+    }
+
+    @Test func screenRecipeEditingClearingUndoRedoAndReopen() async throws {
+        let doc = makeTestDocument(); defer { close(doc) }
+        let undo = try #require(doc.undoManager)
+        undo.groupsByEvent = false
+        undo.disableUndoRegistration()
+        doc.workspace.createFrame(frame("f", dataURL(try pixels(.red))))
+        var web = frame("web", ""); web.isImage = false
+        doc.workspace.createFrame(web)
+        let original = doc.workspace.frames[0]
+        let version = doc.workspace.version
+        doc.workspace.setFrameScreenRecipe(id: "web", flow: "flows/web.yaml", deeplink: nil)
+        doc.workspace.setFrameScreenRecipe(id: "missing", flow: "flows/missing.yaml", deeplink: nil)
+        doc.workspace.setFrameScreenRecipe(id: "f", flow: " \n", deeplink: "")
+        #expect(doc.workspace.version == version)
+        undo.enableUndoRegistration()
+        undo.beginUndoGrouping()
+        doc.workspace.setFrameScreenRecipe(id: "f", flow: "flows/recovery.yaml", deeplink: " comin://recovery ")
+        undo.endUndoGrouping()
+        let edited = doc.workspace.frames[0]
+        #expect(edited.flow == "flows/recovery.yaml" && edited.deeplink == "comin://recovery")
+        let editedVersion = doc.workspace.version
+        doc.workspace.setFrameScreenRecipe(id: "f", flow: edited.flow, deeplink: edited.deeplink)
+        #expect(doc.workspace.version == editedVersion)
+
+        let url = try #require(doc.fileURL)
+        func saveAndCheck(_ expected: FrameModel) async throws {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                doc.save(to: url, ofType: WebFramesDocument.fileTypeIdentifier, for: .saveOperation) { error in
+                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                }
+            }
+            let reopened = try WebFramesDocument(contentsOf: url, ofType: WebFramesDocument.fileTypeIdentifier)
+            defer { close(reopened) }
+            #expect(reopened.workspace.frames[0] == expected)
+        }
+        try await saveAndCheck(edited)
+        undo.undo(); #expect(doc.workspace.frames[0] == original)
+        try await saveAndCheck(original)
+        undo.redo(); #expect(doc.workspace.frames[0] == edited)
+        try await saveAndCheck(edited)
+        undo.beginUndoGrouping()
+        doc.workspace.setFrameScreenRecipe(id: "f", flow: nil, deeplink: nil)
+        undo.endUndoGrouping()
+        #expect(doc.workspace.frames[0] == original)
+        try await saveAndCheck(original)
+        undo.undo(); #expect(doc.workspace.frames[0] == edited)
+        let yaml = "name: recovery\nsteps:\n  - inputText: |+\n      line one\n      line two\n\n"
+        undo.beginUndoGrouping()
+        doc.workspace.setFrameScreenRecipe(id: "f", flow: yaml, deeplink: nil)
+        undo.endUndoGrouping()
+        #expect(doc.workspace.frames[0].flow == yaml)
+        try await saveAndCheck(doc.workspace.frames[0])
     }
 
     @Test func imageOnlyInboxSavesAndRevokesIndependentlyFromCommentPermission() async throws {

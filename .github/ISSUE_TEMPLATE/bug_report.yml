@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible problem in Web Frames.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a security issue, use the repository's Security → Report a vulnerability instead.
+        Please remove private URLs, source code, account details and tokens from screenshots and logs. Do not attach a whole .webframes project or connection.json.
+  - type: input
+    id: version
+    attributes:
+      label: Web Frames version and build
+      description: Find these in About Web Frames. If built from source, include the commit.
+      placeholder: 1.1.6 (11)
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: macOS version and Mac model
+      placeholder: macOS 15.0, MacBook Air M2
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the type of frame (live page, component or image) and a small, non-private example when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include any error message. For an agent/MCP problem, include the agent and MCP client versions; never include pairing credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Screenshots or additional context
+      description: Redact private content before attaching it. Note whether Undo or reopening changes the result.

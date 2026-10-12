@@ -6,7 +6,7 @@ Debug builds deliberately do not start Sparkle or replace the app from Xcode.
 Sparkle asks the user whether to check automatically; installation is not forced.
 
 Production feed: https://www.webframes.pro/updates/appcast.xml
-Version 1.0.1 (build 4) was published on 23 September 2026. The site contains
+The current release is 1.1.7 (build 12), dated 13 October 2026. The site contains
 the signed archive and appcast under public/updates, with revalidation for the feed.
 Preserve published versioned files and never replace this feed with an empty one.
 
@@ -37,6 +37,10 @@ printf 'public-key %s\nbacked-up %s\nwhere <password manager entry / drive label
 ```
 
 Restore on a new machine: `generate_keys --account app.essazanov.webframes -i <file>`.
+The marker must contain exactly one `public-key <key>` record matching the
+current key; a note containing the key or a partial match does not count.
+A copy on the same disk protects against accidental deletion, not disk loss;
+keep an additional owner-controlled copy on a separate secure medium.
 The marker is per machine and is never committed; `--skip-backup-check` exists
 for emergencies only.
 
@@ -69,9 +73,11 @@ Keep older ZIP URLs available. Exclude old_updates/ from deployment.
 - Check offline: show a network error without changing the installed app.
 - In an isolated test feed, tamper with an archive: installation must be rejected.
 
-Production build 4 is published; downloaded ZIP signature, checksum and feed
-were verified. A real install/update/relaunch cycle between two releases remains
-a manual release check. Official setup: https://sparkle-project.org/documentation/
+Release 1.1.6 (11) had its downloaded ZIP signature, checksum and feed verified
+at publication. Local preflight can recheck cached archives and reject tampering;
+it does not establish current live availability or a real install/relaunch.
+The complete install/update/relaunch cycle and clean macOS 15 remain release
+acceptance checks. Official setup: https://sparkle-project.org/documentation/
 
 ## Version and release notes
 

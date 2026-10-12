@@ -12,6 +12,8 @@ $(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Resources/Tools/component-catalog/c
 $(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Resources/Tools/component-catalog/client/catalog.css
 $(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Resources/Tools/component-catalog/client/catalog.jsx
 $(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Resources/Tools/component-catalog/client/index.html
+$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Resources/Tools/component-catalog/client/next-image.mjs
+$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Resources/Tools/component-catalog/client/next-link.mjs
 $(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Resources/Tools/component-catalog/client/next-navigation.mjs
 $(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Resources/Tools/component-catalog/client/preview-data.mjs
 $(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Resources/Tools/component-catalog/client/preview.html

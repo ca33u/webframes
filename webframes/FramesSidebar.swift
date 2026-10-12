@@ -336,8 +336,14 @@ final class FramesSidebar: NSVisualEffectView {
     /// but doesn't change the frames array) would thrash the stack and
     /// flicker hover/highlight state on mouse-over'd rows.
     @MainActor func setFrames(_ frames: [FrameModel], sections: [SectionModel] = [], projectMap: ProjectMapSnapshot?) {
-        let newEntries = frames.map(Entry.from(frame:))
         let membership = SectionModel.membership(frames: frames, sections: sections)
+        let references = Set(sections.compactMap { s in
+            s.referenceFrameID.flatMap { membership[$0] == s.id ? $0 : nil }
+        })
+        let newEntries = frames.map { frame in
+            let entry = Entry.from(frame: frame)
+            return Entry(id: entry.id, label: references.contains(entry.id) ? "★ \(entry.label) · Reference" : entry.label, kind: entry.kind)
+        }
         let newSections = sections.map { s in
             SectionEntry(id: s.id, name: s.name, frameIDs: frames.map(\.id).filter { membership[$0] == s.id }, collapsed: s.collapsed)
         }

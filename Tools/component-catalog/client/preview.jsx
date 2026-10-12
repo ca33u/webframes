@@ -1,12 +1,12 @@
 import React from 'react';
 import {createRoot} from 'react-dom/client';
-import {missingProps} from './preview-data.mjs';
+import {missingProps,previewErrorMessage} from './preview-data.mjs';
 const query=new URLSearchParams(location.search);const id=query.get('id');
 const send=(kind,detail)=>parent.postMessage({webframes:true,id,kind,detail},location.origin);
 class Boundary extends React.Component{
   state={error:null};static getDerivedStateFromError(error){return{error};}
-  componentDidCatch(error){send('error',error.message);}
-  render(){return this.state.error?<div role="alert" style={{padding:20,color:'#b42318',background:'#fff4f2',font:'13px system-ui',whiteSpace:'pre-wrap'}}>Needs setup · {this.state.error.message}</div>:this.props.children;}
+  componentDidCatch(error){send('error',previewErrorMessage(error));}
+  render(){return this.state.error?<div role="alert" style={{padding:20,color:'#b42318',background:'#fff4f2',font:'13px system-ui',whiteSpace:'pre-wrap'}}>Needs setup · {previewErrorMessage(this.state.error)}</div>:this.props.children;}
 }
 const root=createRoot(document.getElementById('root'));
 let Component,Wrapper,meta;
@@ -37,7 +37,7 @@ try{
  if(query.has('state'))state=JSON.parse(query.get('state'));
  render(state);send('ready',null);
  addEventListener('message',event=>{if(event.origin===location.origin && event.source===parent && event.data?.kind==='render')render(event.data.state);});
-}catch(error){root.render(<div role="alert" style={{font:'13px system-ui',padding:20,color:'#b42318'}}>Needs setup · {error.message}</div>);send('error',error.message);}
+}catch(error){const message=previewErrorMessage(error);root.render(<div role="alert" style={{font:'13px system-ui',padding:20,color:'#b42318'}}>Needs setup · {message}</div>);send('error',message);}
 addEventListener('click',event=>{if(event.target.closest?.('a[href]')){event.preventDefault();send('event',{name:'Navigation',value:'Open the live page to navigate.'});}},true);
 addEventListener('submit',event=>event.preventDefault());
 addEventListener('error',event=>send('error',event.message));

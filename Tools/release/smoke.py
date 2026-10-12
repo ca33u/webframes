@@ -34,8 +34,13 @@ with tempfile.TemporaryDirectory(prefix='Web Frames Installed Smoke ') as direct
     project = root / 'Project With Spaces'
     project.mkdir()
     (project / 'package.json').write_text('{"name":"smoke","type":"module"}')
-    (project / 'Button.tsx').write_text('import {save} from "./actions"; export function Button(){return <button onClick={()=>save()}>Hello</button>}')
+    (project / 'Button.tsx').write_text('import {save} from "./actions"; import Link from "next/link"; import Image from "next/image"; export function Button(){return <div><button onClick={()=>save()}>Hello</button><Link href="/docs">Docs</Link><Image src="/test.svg" width={20} height={20} alt="Test"/></div>}')
+    (project / 'public').mkdir()
+    (project / 'public/test.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>')
     (project / 'actions.ts').write_text('"use server"; import "server-only"; import {db} from "unavailable-database"; export async function save(){return db.write()}')
+    (project / 'src/app').mkdir(parents=True)
+    (project / 'src/app/globals.css').write_text(':root { --wf-project-cwd: pending; }')
+    (project / 'postcss.config.cjs').write_text('module.exports = {plugins: [{postcssPlugin: "cwd-check", Declaration(decl) { if (decl.prop === "--wf-project-cwd") decl.value = process.cwd() === __dirname ? "project" : "caller"; }}]};')
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]
     with (root / 'catalog.log').open('w+') as log:
@@ -48,8 +53,15 @@ with tempfile.TemporaryDirectory(prefix='Web Frames Installed Smoke ') as direct
             assert any(c['exportName'] == 'Button' for c in manifest['components'])
             assert b'<html' in read(base + '/')
             # Exercise the native transform addon under Hardened Runtime.
-            assert b'Hello' in read(base + '/@fs/' + quote(str((project / 'Button.tsx').resolve())))
+            transformed = read(base + '/@fs/' + quote(str((project / 'Button.tsx').resolve())))
+            assert b'Hello' in transformed
+            assert b'next-link.mjs' in transformed and b'next-image.mjs' in transformed
+            assert read(base + '/test.svg') == (project / 'public/test.svg').read_bytes()
+            print('PASS: packaged Next preview adapters and project public assets', flush=True)
             assert b'import' in read(base + '/catalog.jsx')
+            css = read(base + '/@fs/' + quote(str((project / 'src/app/globals.css').resolve())))
+            assert b'--wf-project-cwd: project' in css
+            print('PASS: packaged PostCSS uses project cwd when launched from another directory', flush=True)
             component = next(c for c in manifest['components'] if c['exportName'] == 'Button')
             registry = read(base + '/@id/__x00__virtual:webframes/' + component['id'])
             assert registry.count(b'export const load=') == 1

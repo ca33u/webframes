@@ -81,6 +81,18 @@ struct FrameModel: Hashable {
 }
 
 extension FrameModel {
+    /// A navigation recipe for an external runner: inline YAML or a flow file path.
+    /// Kept in extras so older document readers preserve it too.
+    var flow: String? {
+        get { Self.string(extras["flow"]) }
+        set { extras["flow"] = newValue.map(JSONValue.string) }
+    }
+
+    var deeplink: String? {
+        get { Self.string(extras["deeplink"]) }
+        set { extras["deeplink"] = newValue.map(JSONValue.string) }
+    }
+
     /// Keys enumerated as typed properties above. Parse subtracts this set
     /// from the incoming JSON object to populate `extras`, and serialize
     /// writes typed properties last so they always win over any stale
@@ -489,6 +501,9 @@ struct SectionModel: Hashable {
     /// World-space area.
     var rect: CGRect
     var collapsed: Bool = false
+    /// User-selected reference; retained when missing so Undo can restore it.
+    var referenceFrameID: String? = nil
+    var task: String = ""
     /// Fields written by a newer Web Frames; carried through untouched.
     var extras: [String: JSONValue] = [:]
 
@@ -525,7 +540,7 @@ struct SectionModel: Hashable {
 }
 
 extension SectionModel {
-    fileprivate static let typedKeys: Set<String> = ["id", "name", "x", "y", "w", "h", "collapsed"]
+    fileprivate static let typedKeys: Set<String> = ["id", "name", "x", "y", "w", "h", "collapsed", "referenceFrameId", "task"]
 
     init?(jsonValue: JSONValue) {
         guard case .object(let o) = jsonValue, case .string(let id) = o["id"] ?? .null,
@@ -535,6 +550,8 @@ extension SectionModel {
         if case .string(let name) = o["name"] ?? .null { self.name = name } else { self.name = "Section" }
         self.rect = CGRect(x: x, y: y, width: w, height: h)
         if case .bool(let c) = o["collapsed"] ?? .null { self.collapsed = c }
+        if case .string(let id) = o["referenceFrameId"] ?? .null { self.referenceFrameID = id }
+        if case .string(let task) = o["task"] ?? .null { self.task = task }
         var rest: [String: JSONValue] = [:]
         for (k, v) in o where !SectionModel.typedKeys.contains(k) { rest[k] = v }
         self.extras = rest
@@ -549,6 +566,9 @@ extension SectionModel {
         o["w"] = .number(Double(rect.width))
         o["h"] = .number(Double(rect.height))
         if collapsed { o["collapsed"] = .bool(true) } else { o.removeValue(forKey: "collapsed") }
+        if let referenceFrameID { o["referenceFrameId"] = .string(referenceFrameID) }
+        else { o.removeValue(forKey: "referenceFrameId") }
+        if !task.isEmpty { o["task"] = .string(task) } else { o.removeValue(forKey: "task") }
         return .object(o)
     }
 }

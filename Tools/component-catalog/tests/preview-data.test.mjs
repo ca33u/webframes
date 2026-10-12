@@ -1,6 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {missingProps, validExamples, initialState} from '../client/preview-data.mjs';
+import {missingProps, validExamples, initialState, previewErrorMessage} from '../client/preview-data.mjs';
+test('server environment errors explain recovery while retaining the original cause',()=>{
+  for(const message of ["Can't find variable: __dirname",'process is not defined',"Can't find variable: Buffer"]){
+    assert.match(previewErrorMessage(new Error(message)),/Node\/Next server environment/);
+    assert.ok(previewErrorMessage(new Error(message)).endsWith(message));
+  }
+  assert.equal(previewErrorMessage(new Error('Missing ThemeProvider')),'Missing ThemeProvider');
+});
 test('required data is checked before rendering without blocking callbacks and false/zero values',()=>{
   const c={props:[{name:'rows',required:true,kind:'json'},{name:'onSave',required:true,kind:'action'},{name:'count',required:true},{name:'active',required:true},{name:'optional',required:false}]};
   assert.deepEqual(missingProps(c,{count:0,active:false}),['rows']);

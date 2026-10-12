@@ -5,6 +5,8 @@ $(SRCROOT)/Tools/component-catalog/client
 $(SRCROOT)/Tools/component-catalog/client/catalog.css
 $(SRCROOT)/Tools/component-catalog/client/catalog.jsx
 $(SRCROOT)/Tools/component-catalog/client/index.html
+$(SRCROOT)/Tools/component-catalog/client/next-image.mjs
+$(SRCROOT)/Tools/component-catalog/client/next-link.mjs
 $(SRCROOT)/Tools/component-catalog/client/next-navigation.mjs
 $(SRCROOT)/Tools/component-catalog/client/preview-data.mjs
 $(SRCROOT)/Tools/component-catalog/client/preview.html

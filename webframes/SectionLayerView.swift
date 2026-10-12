@@ -8,6 +8,8 @@ struct NativeSection: Equatable {
     let worldRect: CGRect
     /// All member frames are selected.
     let selected: Bool
+    var referenceLabel: String? = nil
+    var hasTask: Bool = false
 }
 
 /// Which part of a section is being dragged to resize it.
@@ -117,7 +119,7 @@ final class SectionLayerView: NSView {
                 handleLayers[section.id] = handles
             }
             let title = titles[section.id] ?? makeTitle(id: section.id)
-            title.setName(section.name, selected: section.selected)
+            title.setName(section.name, selected: section.selected, referenceLabel: section.referenceLabel, hasTask: section.hasTask)
             if borders[section.id] == nil {
                 let border = SectionBorderView(sectionID: section.id)
                 border.owner = self
@@ -299,8 +301,9 @@ final class SectionTitleView: NSView, NSTextFieldDelegate {
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+        setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        toolTip = "Click to select the section's frames, drag to move them, double-click to rename"
+        toolTip = "Click to select, drag to move, double-click to rename. Right-click to choose a reference or edit the agent task."
     }
 
     @available(*, unavailable)
@@ -308,11 +311,17 @@ final class SectionTitleView: NSView, NSTextFieldDelegate {
 
     var preferredWidth: CGFloat { label.intrinsicContentSize.width + 8 }
 
-    func setName(_ name: String, selected: Bool) {
+    func setName(_ name: String, selected: Bool, referenceLabel: String? = nil, hasTask: Bool = false) {
         self.name = name
-        label.stringValue = name
+        label.stringValue = name + (referenceLabel.map { " · ★ \($0)" } ?? "") + (hasTask ? " · Task" : "")
         label.textColor = selected ? WFDesign.accent : WFDesign.text2
-        setAccessibilityLabel("Section \(name)")
+        setAccessibilityLabel("Section \(label.stringValue)")
+    }
+
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let menu = owner?.titleMenu(sectionID) else { return false }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY), in: self)
+        return true
     }
 
     override func mouseDown(with event: NSEvent) {

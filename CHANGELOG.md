@@ -4,6 +4,35 @@ User-facing changes, newest first. Sparkle release notes are generated from
 this file (see Tools/updates/README.md), so write entries for users, not for
 reviewers. Internal refactors and test-only changes do not belong here.
 
+## 1.1.7 (12) — 2026-10-13
+
+### Fixed
+- Frame drags, resize grips and connection handles keep the coordinates of each
+  mouse event, so queued input cannot lose movement.
+- Library previews load project styles consistently when started from another
+  folder, and show clearer guidance for components that need server providers.
+- Undo and Redo of an agent screenshot update are now saved correctly.
+  Reopening the board keeps the image you chose, together with its comments,
+  original comment screenshots and links.
+
+### Added
+- MCP setup walks you through client and board access, tests the connection,
+  and preserves existing client settings with a backup. Large MCP lists and
+  agent briefs now support bounded pages and continuation cursors. Reconnect
+  existing MCP clients after updating: `list_projects` now returns a page object
+  with `projects` and `pagination.nextCursor`, instead of a bare array.
+- Collect variants in a section, choose a reference from its members, and save
+  an agent task. References are marked on the canvas and in the sidebar; MCP
+  shares the pool and reference with your coding agent. Supports Undo and Redo.
+- Magnetic guides align dragged frames with nearby edges and centers. Hold Option
+  to move freely. Screenshot batches form a spaced grid and undo in one step.
+- Library previews render Next links and images without requiring the Next router.
+- Image frames can store a screen flow (YAML or a file path) and an optional
+  deeplink. Choose “Edit screen flow…” in the frame toolbar to save how to
+  reach that screen; recipe edits support Undo and Redo.
+- The comments MCP shares screen recipes with your coding agent and explains
+  how to run the flow, capture a screenshot and update the existing frame.
+
 ## 1.1.6 (11) — 2026-10-05
 
 ### Added

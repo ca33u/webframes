@@ -32,8 +32,10 @@ export function serverBoundary(code,id,root){
 
 export function previewBoundaries(root){
   const navigation=fileURLToPath(new URL('./client/next-navigation.mjs',import.meta.url));
+  const link=fileURLToPath(new URL('./client/next-link.mjs',import.meta.url));
+  const image=fileURLToPath(new URL('./client/next-image.mjs',import.meta.url));
   return {name:'webframes-preview-boundaries',enforce:'pre',
-    resolveId(id){if(id==='next/navigation')return navigation;},
+    resolveId(id){if(id==='next/navigation')return navigation;if(id==='next/link')return link;if(id==='next/image')return image;},
     transform(code,id){return serverBoundary(code,id,root);}
   };
 }

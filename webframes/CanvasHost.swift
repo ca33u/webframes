@@ -31,6 +31,8 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     /// returns nil): clicks, hover, delete are still owned by JS through
     /// Phase 6b. See `LinkLayerView` for the narrowing rationale.
     let linkLayer: LinkLayerView
+    let frameSnapGuideView = FrameSnapGuideView()
+    private(set) var frameSnapGuides: [FrameSnapping.Guide] = []
     // `titlebarDragView` was removed in sidebar-refactor Step 3 follow-up
     // (2026-05-03): the `NSToolbar` configured by `DocumentWindowController`
     // with `.unified` style + `.flexibleSpace` makes the entire title band
@@ -227,7 +229,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     /// false) into the top-left coordinate system used by
     /// `FrameModel.x/y`, `workspace.viewport.panX/panY`, and every
     /// `frameAnchor` / `worldPoint` call downstream. `FrameCardView`
-    /// sources the coord from `window?.mouseLocationOutsideOfEventStream`
+    /// sources the coord from `event.locationInWindow`
     /// which is the window's base (bottom-left) coord space — and since
     /// `window.contentView === canvasHost`, flipping against
     /// `canvasHost.bounds.height` is the exact transform.
@@ -273,14 +275,33 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     /// Per-tick drag update. Computes new world-space origin from the
     /// anchor so dropped events / coarse sampling don't drift. Pushes a
     /// full refresh so link anchors and pin overlays track the card.
-    func updateFrameDrag(clientX: CGFloat, clientY: CGFloat) {
+    func updateFrameDrag(clientX: CGFloat, clientY: CGFloat, snap: Bool = true) {
         guard var state = frameDragState,
               let workspace = document?.workspace else { return }
         let scale = workspace.viewport.scale
         guard scale > 0 else { return }
         let cy = flipClientY(clientY)
-        state.currentX = state.anchorX + (clientX - state.startClient.x) / scale
-        state.currentY = state.anchorY + (cy - state.startClient.y) / scale
+        var delta = CGPoint(x: (clientX - state.startClient.x) / scale, y: (cy - state.startClient.y) / scale)
+        frameSnapGuides = []
+        // A click must never move a card. Option temporarily bypasses attraction.
+        if snap, !NSEvent.modifierFlags.contains(.option), hypot(delta.x, delta.y) * scale >= 3 {
+            var movingBounds: CGRect = .null
+            var targets: [CGRect] = []
+            for frame in workspace.frames {
+                let size = CardGeometry.cardSize(width: frame.w, height: frame.h)
+                if let origin = state.origins[frame.id] {
+                    movingBounds = movingBounds.union(CGRect(origin: origin, size: size))
+                } else {
+                    targets.append(CGRect(x: frame.x, y: frame.y, width: size.width, height: size.height))
+                }
+            }
+            let result = FrameSnapping.snap(bounds: movingBounds, delta: delta, targets: targets, scale: scale)
+            delta = result.delta
+            frameSnapGuides = result.guides
+        }
+        state.currentX = state.anchorX + delta.x
+        state.currentY = state.anchorY + delta.y
+        frameSnapGuideView.show(frameSnapGuides, viewport: workspace.viewport)
         frameDragState = state
         scheduleGesturePreview()
     }
@@ -293,6 +314,8 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     func endFrameDrag() {
         guard let state = frameDragState else { return }
         frameDragState = nil
+        frameSnapGuides = []
+        if let viewport = document?.workspace.viewport { frameSnapGuideView.show([], viewport: viewport) }
         endGesturePreview()
         let moved = (state.currentX != state.anchorX) || (state.currentY != state.anchorY)
         if moved {
@@ -1341,9 +1364,9 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         dock.setZoomPercent(Int((next.scale * 100).rounded()))
     }
 
-    private func performDockZoomFit() {
+    private func performDockZoomFit(fitting subset: [FrameModel]? = nil) {
         guard let workspace = document?.workspace else { return }
-        let frames = workspace.frames
+        let frames = subset ?? workspace.frames
         let pad: CGFloat = 80
         let next: ViewportModel
         if frames.isEmpty {
@@ -1917,6 +1940,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         // canvas WKWebView. `hitTest` returns nil so pointer events fall
         // through to frames / the canvas WKWebView untouched.
         addSubview(linkLayer)
+        addSubview(frameSnapGuideView)
         // Annotation cursor shield — transparent, hit-test pass-through,
         // registers a crosshair cursor rect when annotation mode is on.
         // Added right after linkLayer so it sits above frames; the dock,
@@ -2467,7 +2491,9 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
             let members = workspace.frames.filter { membership[$0.id] == section.id }.map(\.id)
             return NativeSection(id: section.id, name: section.name, worldRect: sectionRect(section),
                                  selected: section.id == selectedSectionID
-                                    || (!members.isEmpty && members.allSatisfy(selected.contains)))
+                                    || (!members.isEmpty && members.allSatisfy(selected.contains)),
+                                 referenceLabel: section.referenceFrameID == nil ? nil : (workspace.referenceFrame(in: section)?.label ?? "Reference unavailable"),
+                                 hasTask: !section.task.isEmpty)
         }
         sectionLayer.setSections(natives)
     }
@@ -2560,7 +2586,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         sectionGesture = g
         if g.movesFrames {
             let p = convert(event.locationInWindow, from: nil)
-            updateFrameDrag(clientX: p.x, clientY: p.y)
+            updateFrameDrag(clientX: p.x, clientY: p.y, snap: false)
         }
         pushSectionsFromWorkspace()
     }
@@ -2582,6 +2608,35 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     }
     @objc private func deleteSectionFromMenu(_ sender: NSMenuItem) {
         if let id = sender.representedObject as? String { document?.workspace.deleteSection(id: id) }
+    }
+
+    @objc private func setSectionReferenceFromMenu(_ sender: NSMenuItem) {
+        guard let ids = sender.representedObject as? [String], let sectionID = ids.first else { return }
+        document?.workspace.setSectionReference(id: sectionID, frameID: ids.count > 1 ? ids[1] : nil)
+    }
+
+    @objc private func editSectionTaskFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let window, let document,
+              let section = document.workspace.sections.first(where: { $0.id == id }) else { return }
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 460, height: 140))
+        scroll.hasVerticalScroller = true
+        let editor = NSTextView(frame: scroll.bounds)
+        editor.isRichText = false
+        editor.font = .systemFont(ofSize: 13)
+        editor.string = section.task
+        editor.setAccessibilityLabel("Section task")
+        scroll.documentView = editor
+        let alert = NSAlert()
+        alert.messageText = "Agent task · \(section.name)"
+        alert.informativeText = "Describe what to unify. Choose a reference from the section menu; your agent can read both through MCP."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = scroll
+        alert.beginSheetModal(for: window) { [weak document] response in
+            guard response == .alertFirstButtonReturn else { return }
+            document?.workspace.setSectionTask(id: id, task: editor.string)
+        }
+        window.makeFirstResponder(editor)
     }
 
     // MARK: - LinkLayerViewDelegate (Phase 6e Step 2)
@@ -3019,6 +3074,22 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         document?.workspace.renameFrame(id: id, label: trimmed)
     }
 
+    func editFrameScreenRecipe(id: String) {
+        guard let window, let document,
+              let frame = document.workspace.frames.first(where: { $0.id == id }), frame.isImage else { return }
+        let editor = ScreenRecipeEditor(flow: frame.flow, deeplink: frame.deeplink)
+        let alert = NSAlert()
+        alert.messageText = "Screen flow · \(frame.label)"
+        alert.informativeText = "Save how to open this screen. Your coding agent can read this recipe and capture a fresh screenshot."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = editor
+        alert.beginSheetModal(for: window) { [weak document] response in
+            guard response == .alertFirstButtonReturn else { return }
+            document?.workspace.setFrameScreenRecipe(id: id, flow: editor.flow, deeplink: editor.deeplink)
+        }
+    }
+
     // MARK: - Add-frame modal presentation
 
     /// Entry point from `NativeBridge` when the canvas sends
@@ -3337,15 +3408,14 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     /// frames). Returns `true` iff at least one frame was created, which
     /// is what `performDragOperation` wants to surface back to the OS.
     @discardableResult
-    /// Adds image frames centered on `point` (drop location or the visible
-    /// center for paste), side by side when there are several, and selects
-    /// them. The spec applier's default origin stacks new frames to the
-    /// right of every existing one, which on a full board is off-screen.
-    private func spawnImageFrames(items: [[String: Any]], centeredAt point: CGPoint? = nil) -> Bool {
+    /// Packs batches near the drop location, keeping new and existing cards apart.
+    /// A single pasted image keeps the familiar centered placement.
+    private func spawnImageFrames(items: [[String: Any]], centeredAt point: CGPoint? = nil, label: String? = nil) -> Bool {
         guard let workspace = document?.workspace, !items.isEmpty else {
             return false
         }
-        let spec: [String: Any] = ["kind": "image", "images": items]
+        var spec: [String: Any] = ["kind": "image", "images": items]
+        if let label { spec["label"] = label }
         let models = AddFrameSpecApplier.frames(
             for: spec,
             existingFrameCount: workspace.frames.count,
@@ -3355,16 +3425,22 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         )
         guard !models.isEmpty else { return false }
         let target = point ?? visibleCenterWorldPoint()
-        let gap: CGFloat = 48
-        let rowWidth = models.reduce(CGFloat.zero) { $0 + $1.w + CardGeometry.chromeWidth } + gap * CGFloat(models.count - 1)
-        var x = target.x - rowWidth / 2
-        for var model in models {
-            model.x = x.rounded()
-            model.y = (target.y - (model.h + CardGeometry.chromeHeight) / 2).rounded()
-            x += model.w + CardGeometry.chromeWidth + gap
+        let positions = ImageBatchLayout.positions(for: models, centeredAt: target,
+            availableWidth: max(1, bounds.width - 160) / workspace.viewport.scale,
+            avoiding: models.count > 1 ? workspace.frames : [])
+        var placed: [FrameModel] = []
+        let undo = document?.undoManager
+        undo?.beginUndoGrouping()
+        for (index, var model) in models.enumerated() {
+            model.x = positions[index].x
+            model.y = positions[index].y
             workspace.createFrame(model)
+            placed.append(model)
         }
+        undo?.setActionName(models.count > 1 ? "Import Images" : "Add Image")
+        undo?.endUndoGrouping()
         setFrameSelection(models.map(\.id))
+        if models.count > 1 { performDockZoomFit(fitting: placed) }
         return true
     }
 
@@ -3373,6 +3449,12 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     func addFrameModal(_ modal: AddFrameModal,
                        didConfirmSpec spec: [String: Any]) {
         dismissAddFrameModal()
+        if spec["kind"] as? String == "image", let items = spec["images"] as? [[String: Any]] {
+            if spawnImageFrames(items: items, label: spec["label"] as? String), selectedFrameIDs.count == 1 {
+                zoomToSelectedFrame()
+            }
+            return
+        }
         // Phase 6e Step 70b: the spec used to go through
         // `forwardToCanvas("add-frame-spec")` → JS `applyAddFrameSpec`
         // → `spawnFrame` / `spawnImageFrame` → `NativeAPI
@@ -3753,6 +3835,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         sectionLayer.frame = bounds
         frameLayer.frame = bounds
         linkLayer.frame = bounds
+        frameSnapGuideView.frame = bounds
         annotationCursorShield.frame = bounds
         panCursorShield.frame = bounds
         // `titlebarDragView.frame = ...` was here — removed 2026-05-03,
@@ -3849,6 +3932,8 @@ extension CanvasHost: SectionLayerViewDelegate {
     }
 
     func sectionLayer(_ layer: SectionLayerView, menuForSection id: String) -> NSMenu? {
+        guard let workspace = document?.workspace,
+              let section = workspace.sections.first(where: { $0.id == id }) else { return nil }
         let menu = NSMenu()
         for (title, action) in [("Rename", #selector(renameSectionFromMenu(_:))),
                                 ("Select Frames", #selector(selectSectionFromMenu(_:)))] {
@@ -3856,6 +3941,25 @@ extension CanvasHost: SectionLayerViewDelegate {
             item.target = self
             item.representedObject = id
         }
+        let reference = menu.addItem(withTitle: "Choose Reference", action: nil, keyEquivalent: "")
+        let choices = NSMenu()
+        for frame in workspace.frames(in: section) {
+            let item = choices.addItem(withTitle: frame.label.isEmpty ? frame.id : frame.label,
+                                       action: #selector(setSectionReferenceFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = [id, frame.id]
+            item.state = section.referenceFrameID == frame.id ? .on : .off
+        }
+        choices.addItem(.separator())
+        let clear = choices.addItem(withTitle: "Clear Reference", action: #selector(setSectionReferenceFromMenu(_:)), keyEquivalent: "")
+        clear.target = self
+        clear.representedObject = [id]
+        clear.isEnabled = section.referenceFrameID != nil
+        choices.autoenablesItems = false
+        reference.submenu = choices
+        let task = menu.addItem(withTitle: "Edit Agent Task…", action: #selector(editSectionTaskFromMenu(_:)), keyEquivalent: "")
+        task.target = self
+        task.representedObject = id
         menu.addItem(.separator())
         let remove = menu.addItem(withTitle: "Remove Section", action: #selector(deleteSectionFromMenu(_:)), keyEquivalent: "")
         remove.target = self

@@ -553,6 +553,8 @@ final class FrameManager: PinOverlayDelegate, FrameCardDelegate {
             host.freezeFrameAsSnapshot(id: card.id)
         case .restoreLive:
             host.restoreSnapshotToLive(id: card.id)
+        case .editScreenRecipe:
+            host.editFrameScreenRecipe(id: card.id)
         case .sizePreset(let preset):
             host.applyFrameSizePreset(id: card.id, preset: preset)
         case .sizeCommit(let w, let h):

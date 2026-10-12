@@ -49,6 +49,11 @@ The UI edits props, switches examples, width and light/dark theme, displays call
 - Exported React functions/arrows, default exports, local export aliases, inline memo/forwardRef bodies containing JSX. Exported classes with JSX are listed; props controls for class declarations are not inferred yet.
 - Local TypeScript interfaces/type literals/unions and literal destructured defaults → string, number, boolean, enum, callback and JSON controls. Unknown/imported/complex types can be supplied through JSON, without fabricated type information.
 - Plain HTML pages belong in the existing live page map; Vue, Svelte, React Native, server components and framework-only modules require separate adapters.
+- Next navigation, Link and Image have preview adapters: navigation is simulated,
+  links render as anchors without prefetch, and images use original assets from
+  the project's public directory. This does not reproduce Next image optimization,
+  authentication, server providers or server actions; supply fixture providers
+  through `.webframes/preview.tsx` for those components.
 - `@/` and `~/` resolve to src when present, otherwise project root. Other aliases, framework plugins, Tailwind processing, monorepo dependency boundaries and imported prop type analysis are not automatically reproduced. Existing Vite/Next configs are deliberately not executed.
 - Gallery previews have a compact scale; the detail view renders at its selected viewport width. No automatic screenshot inventory.
 - File-level imports are labelled “Source references”; they are not claims about observed runtime usage.
@@ -67,6 +72,8 @@ Server binds only to 127.0.0.1; Host and Origin must match. Vite filesystem allo
 Next.js PostCSS arrays of package names and `[name, options]` entries are resolved
 from the selected project before being passed to Vite. Standard plugin maps
 continue through Vite's loader. Project configuration files are not rewritten.
+The helper uses the selected project as its working directory so Tailwind source
+discovery also works when the manual command is launched from another folder.
 
 When a project has a PostCSS configuration, the native app uses an existing
 user-installed Node (22.12+) to run that project's CSS toolchain. Native addons

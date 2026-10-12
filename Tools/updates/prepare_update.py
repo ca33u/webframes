@@ -28,7 +28,9 @@ def require_key_backup(public_key, skip):
         raise ValueError(
             "No Sparkle key backup recorded. Export the private key and write the marker first "
             f"(README, 'Back up the signing key'): {BACKUP_MARKER}")
-    if public_key not in BACKUP_MARKER.read_text():
+    recorded_keys = [parts[1] for line in BACKUP_MARKER.read_text().splitlines()
+                     if len(parts := line.split(maxsplit=1)) == 2 and parts[0] == 'public-key']
+    if recorded_keys != [public_key]:
         raise ValueError(
             "The recorded Sparkle key backup is for a different key. Back up the current key "
             f"and rewrite {BACKUP_MARKER} before publishing.")

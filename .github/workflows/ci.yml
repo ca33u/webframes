@@ -24,6 +24,8 @@ jobs:
         run: npm ci --ignore-scripts --prefix Tools/component-catalog
       - name: Test
         run: npm test --prefix Tools
+      - name: Test public source preparation (offline)
+        run: python3 -m unittest discover -s Tools/release -p 'test_*.py'
 
   swift:
     name: macOS app

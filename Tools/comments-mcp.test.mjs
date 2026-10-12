@@ -13,7 +13,8 @@ const screenshot = Buffer.from('fake-png').toString('base64');
 writeFileSync(file, JSON.stringify({
   name: 'Demo',
   projectMap: {rootPath: '/tmp/demo-source', framework: 'Next.js'},
-  sections: [{id: 's1', name: 'Onboarding', x: -100, y: -100, w: 2000, h: 1200}],
+  sections: [{id: 's1', name: 'Onboarding', x: -100, y: -100, w: 2000, h: 1200,
+    referenceFrameId: 'f1', task: 'Unify primary buttons using Home'}],
   frames: [{id: 'f1', label: 'Home', url: 'https://raw.githubusercontent.com/acme/site/main/index.html?token=legacy-secret', x: 0, y: 0, w: 1280, h: 800}],
   annotations: [{
     id: 'a1', num: 1, frameId: 'f1', comment: 'Increase heading size', resolved: false,
@@ -65,12 +66,25 @@ try {
   assert.equal(payload.comments[0].comment, 'Increase heading size');
   assert.ok(!payload.comments[0].frame.url.includes('legacy-secret'));
   assert.ok(!payload.comments[0].frame.url.includes('token='));
+  const frames = JSON.parse((await request(20, 'tools/call', {name: 'list_frames', arguments: {}})).result.content[0].text).frames;
+  assert.equal(frames[0].flow, null);
+  assert.equal(frames[0].deeplink, null);
+  assert.equal(frames[0].sectionId, 's1');
+  assert.equal(frames[0].isReference, true);
+  const sections = JSON.parse((await request(21, 'tools/call', {name: 'list_sections', arguments: {}})).result.content[0].text).sections;
+  assert.deepEqual(sections[0].frameIds, ['f1']);
+  assert.equal(sections[0].referenceFrameId, 'f1');
+  assert.equal(sections[0].referenceStatus, 'available');
+  assert.equal(sections[0].reference.label, 'Home');
+  assert.equal(sections[0].task, 'Unify primary buttons using Home');
   const detail = await request(3, 'tools/call', {name: 'get_comment', arguments: {id: 'a1'}});
   assert.equal(detail.result.content[1].type, 'image');
   assert.equal(detail.result.content[1].data, screenshot);
   const brief = await request(4, 'tools/call', {name: 'get_agent_brief', arguments: {}});
   assert.match(brief.result.content[0].text, /Increase heading size/);
   assert.match(brief.result.content[0].text, /Section: Onboarding/);
+  assert.match(brief.result.content[0].text, /User-selected reference: Home · frame_id: f1/);
+  assert.match(brief.result.content[0].text, /height, radius, color, font and padding/);
   assert.equal(payload.comments[0].frame.section, 'Onboarding');
   assert.match(brief.result.content[0].text, /Area: x 128, y 320, 384×160 CSS px of the viewport; contains div\.card "Revenue"/);
   assert.equal(payload.comments[0].element.area, null);
@@ -80,6 +94,20 @@ try {
   writeFileSync(file, JSON.stringify(updated));
   const live = await request(5, 'tools/call', {name: 'list_comments', arguments: {status: 'open'}});
   assert.equal(JSON.parse(live.result.content[0].text).comments[0].comment, 'Updated while Claude is connected');
+  // Moving a reference out never silently chooses a different member.
+  updated.frames[0].x = 4000;
+  writeFileSync(file, JSON.stringify(updated));
+  const missing = JSON.parse((await request(22, 'tools/call', {name: 'list_sections', arguments: {}})).result.content[0].text).sections[0];
+  assert.equal(missing.referenceFrameId, 'f1');
+  assert.equal(missing.referenceStatus, 'unavailable');
+  assert.equal(missing.reference, null);
+  assert.deepEqual(missing.frameIds, []);
+  const unavailableBrief = (await request(23, 'tools/call', {name: 'get_agent_brief', arguments: {}})).result.content[0].text;
+  assert.match(unavailableBrief, /UNAVAILABLE \(f1\)/);
+  delete updated.sections[0].referenceFrameId;
+  writeFileSync(file, JSON.stringify(updated));
+  const cleared = JSON.parse((await request(24, 'tools/call', {name: 'list_sections', arguments: {}})).result.content[0].text).sections[0];
+  assert.equal(cleared.referenceStatus, 'not_selected');
 } finally {
   server.kill();
   rmSync(root, {recursive: true, force: true});
@@ -98,7 +126,9 @@ test('comments MCP reads package documents and their screenshot files', async ()
   writeFileSync(path.join(pkg, 'images', `${digest}.png`), png);
   writeFileSync(path.join(pkg, 'document.json'), JSON.stringify({
     version: 2, name: 'Package', frames: [{id: 'f1', label: 'Home', url: 'image://Home', w: 390, h: 844,
-      isImage: true, imgUrl: `wf-image:images/${digest}.png`, imageUpdatedBy: 'MCP agent'}],
+      isImage: true, imgUrl: `wf-image:images/${digest}.png`, imageUpdatedBy: 'MCP agent',
+      flow: 'appId: app.essazanov.Comin\n---\n- launchApp\n- tapOn: Забыли пароль?',
+      deeplink: 'comin://recovery?screen=reset&token=private-token'}],
     annotations: [{id: 'a1', num: 1, frameId: 'f1', comment: 'Tighten spacing', resolved: false, xPct: 1, yPct: 2,
       color: 'blue', edits: {}, element: {selector: '.card', screenshot: `wf-image:images/${digest}.png`}}],
   }));
@@ -113,8 +143,9 @@ test('comments MCP reads package documents and their screenshot files', async ()
   child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 4, method: 'tools/call', params: {name: 'get_frame', arguments: {frame_id: 'f1'}}}) + '\n');
   child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 5, method: 'tools/list'}) + '\n');
   child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 6, method: 'tools/call', params: {name: 'update_frame_image', arguments: {frame_id: 'missing', image_path: '/tmp/screen.png'}}}) + '\n');
+  child.stdin.write(JSON.stringify({jsonrpc: '2.0', id: 7, method: 'tools/call', params: {name: 'get_agent_brief', arguments: {}}}) + '\n');
   try {
-    for (let i = 0; i < 60 && replies.length < 6; i++) await new Promise(r => setTimeout(r, 50));
+    for (let i = 0; i < 60 && replies.length < 7; i++) await new Promise(r => setTimeout(r, 50));
     const projects = JSON.parse(replies.find(r => r.id === 1).result.content[0].text);
     assert.equal(JSON.stringify(projects).includes('Package'), true);
     const detail = replies.find(r => r.id === 2).result;
@@ -124,9 +155,17 @@ test('comments MCP reads package documents and their screenshot files', async ()
     assert.equal(frames[0].id, 'f1');
     assert.equal(frames[0].isImage, true);
     assert.equal(frames[0].imageHash, digest);
+    assert.equal(frames[0].flow, 'appId: app.essazanov.Comin\n---\n- launchApp\n- tapOn: Забыли пароль?');
+    assert.equal(frames[0].deeplink, 'comin://recovery?screen=reset');
     const current = replies.find(r => r.id === 4).result;
     assert.equal(current.content[1].data, png.toString('base64'));
     assert.equal(JSON.parse(current.content[0].text).frame.imageUpdatedBy, 'MCP agent');
+    assert.equal(JSON.parse(current.content[0].text).frame.flow, frames[0].flow);
+    assert.equal(JSON.parse(current.content[0].text).frame.deeplink, frames[0].deeplink);
+    const brief = replies.find(r => r.id === 7).result.content[0].text;
+    assert.match(brief, /run_flow.*screenshot.*update_frame_image/);
+    assert.match(brief, /keep the current frame image/);
+    assert.ok(!JSON.stringify(replies).includes('private-token'));
     const updateTool = replies.find(r => r.id === 5).result.tools.find(tool => tool.name === 'update_frame_image');
     assert.deepEqual(updateTool.inputSchema.required, ['frame_id', 'image_path']);
     assert.equal(updateTool.annotations.readOnlyHint, false);

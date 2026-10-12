@@ -45,6 +45,7 @@ enum FrameCardIntent {
     case goBack
     case freezeSnapshot
     case restoreLive
+    case editScreenRecipe
     case sizePreset(String)           // "desktop" | "mobile"
     case sizeCommit(w: CGFloat, h: CGFloat)
     case titleCommit(String)
@@ -253,6 +254,7 @@ final class FrameCardView: NSView {
         toolbar.onBack = { forward(.goBack) }
         toolbar.onFreezeSnapshot = { forward(.freezeSnapshot) }
         toolbar.onRestoreLive = { forward(.restoreLive) }
+        toolbar.onScreenRecipe = { forward(.editScreenRecipe) }
         toolbar.onPreset = { forward(.sizePreset($0)) }
         toolbar.onSizeCommit = { [weak self] w, h in
             guard let s = self?.chrome else { return }
@@ -713,14 +715,14 @@ final class DragCapableView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard dragEnabled else { super.mouseDown(with: event); return }
-        let p = window?.mouseLocationOutsideOfEventStream ?? NSEvent.mouseLocation
+        let p = event.locationInWindow
         onSelect?(.select)
         onIntent?(.dragStart(clientX: p.x, clientY: p.y))
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard dragEnabled else { return }
-        let p = window?.mouseLocationOutsideOfEventStream ?? NSEvent.mouseLocation
+        let p = event.locationInWindow
         onIntent?(.dragMove(clientX: p.x, clientY: p.y))
     }
 
@@ -744,6 +746,7 @@ private final class FrameToolbarView: NSView {
     var onBack: (() -> Void)?
     var onFreezeSnapshot: (() -> Void)?
     var onRestoreLive: (() -> Void)?
+    var onScreenRecipe: (() -> Void)?
     var onPreset: ((String) -> Void)?
     /// Callback receives the committed width/height; nil for the axis
     /// that didn't change.
@@ -754,6 +757,7 @@ private final class FrameToolbarView: NSView {
 
     private let backButton    = IconActionButton(symbol: "chevron.backward")
     private let snapshotButton = IconActionButton(symbol: "camera")
+    private let screenRecipeButton = IconActionButton(symbol: "point.topleft.down.to.point.bottomright.curvepath")
     private let desktopButton = IconToggleButton(symbol: "desktopcomputer")
     private let mobileButton  = IconToggleButton(symbol: "iphone")
     private let widthField    = NumericField()
@@ -791,6 +795,9 @@ private final class FrameToolbarView: NSView {
 
         backButton.translatesAutoresizingMaskIntoConstraints = false
         snapshotButton.translatesAutoresizingMaskIntoConstraints = false
+        screenRecipeButton.translatesAutoresizingMaskIntoConstraints = false
+        screenRecipeButton.toolTip = "Edit screen flow…"
+        screenRecipeButton.setAccessibilityLabel("Edit screen flow")
         desktopButton.translatesAutoresizingMaskIntoConstraints = false
         mobileButton.translatesAutoresizingMaskIntoConstraints = false
         widthField.translatesAutoresizingMaskIntoConstraints = false
@@ -803,6 +810,8 @@ private final class FrameToolbarView: NSView {
             backButton.heightAnchor.constraint(equalToConstant: iconSize),
             snapshotButton.widthAnchor.constraint(equalToConstant: iconSize),
             snapshotButton.heightAnchor.constraint(equalToConstant: iconSize),
+            screenRecipeButton.widthAnchor.constraint(equalToConstant: iconSize),
+            screenRecipeButton.heightAnchor.constraint(equalToConstant: iconSize),
             desktopButton.widthAnchor.constraint(equalToConstant: iconSize),
             desktopButton.heightAnchor.constraint(equalToConstant: iconSize),
             mobileButton.widthAnchor.constraint(equalToConstant: iconSize),
@@ -823,7 +832,7 @@ private final class FrameToolbarView: NSView {
             pill.heightAnchor.constraint(equalToConstant: pillHeight).isActive = true
         }
 
-        navPill.contentView   = Self.pillContent([backButton, snapshotButton], insets: 4)
+        navPill.contentView   = Self.pillContent([backButton, snapshotButton, screenRecipeButton], insets: 4)
         sizePill.contentView  = Self.pillContent([desktopButton, mobileButton,
                                                   widthField, aspectLock, heightField],
                                                  insets: 6)
@@ -851,6 +860,7 @@ private final class FrameToolbarView: NSView {
         ])
 
         backButton.onClick    = { [weak self] in self?.onBack?() }
+        screenRecipeButton.onClick = { [weak self] in self?.onScreenRecipe?() }
         snapshotButton.onClick = { [weak self] in
             guard let self else { return }
             if self.snapshotRestoresLive { self.onRestoreLive?() }
@@ -891,10 +901,11 @@ private final class FrameToolbarView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     func apply(state: FrameCardState, mobileBreakpoint: CGFloat) {
-        // Ordinary imported images have no web source. A frozen snapshot
-        // keeps this capsule visible as a one-click route back to live.
-        navPill.isHidden = state.isImage && !state.canRestoreLive
+        // Images expose their screen recipe; frozen snapshots also offer
+        // a one-click route back to the original live website.
         backButton.isHidden = state.isImage
+        screenRecipeButton.isHidden = !state.isImage
+        snapshotButton.isHidden = state.isImage && !state.canRestoreLive
         snapshotRestoresLive = state.canRestoreLive
         snapshotButton.symbolName = state.canRestoreLive ? "globe" : "camera"
         snapshotButton.toolTip = state.canRestoreLive
@@ -1501,15 +1512,15 @@ private final class LinkHandleView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        let p = window?.mouseLocationOutsideOfEventStream ?? NSEvent.mouseLocation
+        let p = event.locationInWindow
         onIntent?(.linkDragStart(side: side, clientX: p.x, clientY: p.y))
     }
     override func mouseDragged(with event: NSEvent) {
-        let p = window?.mouseLocationOutsideOfEventStream ?? NSEvent.mouseLocation
+        let p = event.locationInWindow
         onIntent?(.linkDragMove(clientX: p.x, clientY: p.y))
     }
     override func mouseUp(with event: NSEvent) {
-        let p = window?.mouseLocationOutsideOfEventStream ?? NSEvent.mouseLocation
+        let p = event.locationInWindow
         onIntent?(.linkDragEnd(clientX: p.x, clientY: p.y))
     }
 
@@ -1548,11 +1559,11 @@ private final class ResizeGripView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        let p = window?.mouseLocationOutsideOfEventStream ?? NSEvent.mouseLocation
+        let p = event.locationInWindow
         onIntent?(.resizeStart(mode: mode, clientX: p.x, clientY: p.y))
     }
     override func mouseDragged(with event: NSEvent) {
-        let p = window?.mouseLocationOutsideOfEventStream ?? NSEvent.mouseLocation
+        let p = event.locationInWindow
         onIntent?(.resizeMove(clientX: p.x, clientY: p.y))
     }
     override func mouseUp(with event: NSEvent) {

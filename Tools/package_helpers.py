@@ -35,7 +35,8 @@ notices.mkdir(exist_ok=True)
 shutil.copy2(runtime / 'LICENSE', notices / 'Node.js-LICENSE.txt')
 identity = os.environ.get('EXPANDED_CODE_SIGN_IDENTITY') or '-'
 flags = ['--force', '--sign', identity, '--options', 'runtime']
-flags += ['--timestamp' if identity != '-' and os.environ.get('CONFIGURATION') == 'Release' else '--timestamp=none']
+flags += ['--timestamp' if identity != '-' and os.environ.get('CONFIGURATION') == 'Release'
+          and os.environ.get('WEBFRAMES_OFFLINE_SIGNING') != 'YES' else '--timestamp=none']
 for addon in target.rglob('*.node'):
     subprocess.run(['/usr/bin/codesign', *flags, str(addon)], check=True)
 subprocess.run(['/usr/bin/codesign', *flags, '--identifier', 'app.essazanov.webframes.node', '--entitlements', str(root / 'Tools/node.entitlements'), str(node)], check=True)

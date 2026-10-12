@@ -1,0 +1,7 @@
+# Keep private maintainer material out of release source archives.
+/docs/internal export-ignore
+/.claude export-ignore
+/.codex export-ignore
+/.codex-bridge export-ignore
+/build export-ignore
+/release export-ignore

@@ -1,4 +1,11 @@
 // Missing required inputs are a setup state, not a crashed component.
+export function previewErrorMessage(error) {
+  const message=String(error?.message||error);
+  if(/(?:Can't find variable:|is not defined).*\b(?:process|__dirname|require|Buffer)\b|\b(?:process|__dirname|require|Buffer)\b is not defined/.test(message)) {
+    return 'This component imports code that needs a Node/Next server environment. Supply mock providers or a browser-only wrapper in .webframes/preview.tsx, or open the live page. '+message;
+  }
+  return message;
+}
 export function missingProps(component, args = {}) {
   return (component.props || []).filter(p => p.required && p.kind !== 'action' && args[p.name] === undefined).map(p => p.name);
 }

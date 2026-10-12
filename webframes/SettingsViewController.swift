@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
     private var codexButtons: [NSButton] = []
     private var keyCards: [ProviderKeyCard] = []
     private var task: Task<Void, Never>?
+    private var mcpSetup: MCPSetupWizard?
     private let trustedList = NSStackView()
     private let evidenceStatus = NSTextField(wrappingLabelWithString: "")
     private var revokeAllButton: NSButton?
@@ -175,7 +176,8 @@ import UniformTypeIdentifiers
         let card = SettingsUI.card("Claude · MCP", subtitle: "Connect Claude to Web Frames once, then choose a saved project and read its comments, selectors and screenshots.", symbol: "point.3.connected.trianglepath.dotted")
         let desktop = SettingsUI.button("Copy Desktop config", target: self, action: #selector(copyDesktop), id: "settings.claude.desktop")
         let code = SettingsUI.button("Copy Code command", target: self, action: #selector(copyCode), id: "settings.claude.code")
-        card.addRow(NSStackView(views: [desktop, code]))
+        let setup = SettingsUI.button("Set up MCP…", target: self, action: #selector(setupMCP), id: "settings.mcp.setup")
+        card.addRow(NSStackView(views: [setup, desktop, code]))
         claudeStatus.stringValue = "Not configured here · uses the existing Web Frames MCP server"
         claudeStatus.font = .systemFont(ofSize: 11); claudeStatus.textColor = WFDesign.text2
         card.addRow(claudeStatus)
@@ -228,6 +230,12 @@ import UniformTypeIdentifiers
         catch { codexStatus.stringValue = "Could not remove the saved connection from Keychain."; codexStatus.textColor = .systemOrange }
     }
     @objc private func copyDesktop() { copyClaude(forDesktop: true) }
+    @objc private func setupMCP() {
+        guard let window = view.window else { return }
+        let wizard = MCPSetupWizard(parent: window)
+        mcpSetup = wizard
+        wizard.show()
+    }
     @objc private func copyCode() { copyClaude(forDesktop: false) }
     private func copyClaude(forDesktop: Bool) {
         do {

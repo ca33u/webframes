@@ -93,6 +93,9 @@ test('screenshot fixes preserve visual context and accept bounded project source
   const content='x'.repeat(100000);
   const files=Array.from({length:13},(_,i)=>({path:`screen${i}.tsx`,content,hash:createHash('sha256').update(content).digest('hex')}));
   assert.equal(validateJob({...request,files}).comments[0].xPct,0.25);
+  request.comments[0].referenceScreenshotIndex = 0;
+  assert.equal(validateJob({...request,files}).comments[0].referenceScreenshotIndex,0);
+  assert.throws(()=>validateJob({...request,comments:[{...request.comments[0],referenceScreenshotIndex:5}]}),/Invalid reference screenshot index/);
   assert.throws(()=>validateJob({...body(),files}),/512 KB/);
   assert.throws(()=>validateJob({...request,files:[...files,...files.slice(0,8).map((f,i)=>({...f,path:`extra${i}.tsx`}))]}),/2000 KB/);
 });
