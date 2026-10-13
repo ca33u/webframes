@@ -194,6 +194,11 @@ import UniformTypeIdentifiers
         updateFrameImagesToggle = imagesToggle
         card.addRow(imagesToggle)
         card.addRow(SettingsUI.label("Allows local agents to replace image frames with fresh screenshots. Comments keep their original snapshots. Updates can be undone.", size: 11))
+        let captureToggle = NSButton(checkboxWithTitle: "Allow agents to capture simulator screens", target: self, action: #selector(changeSimulatorCapturePermission(_:)))
+        captureToggle.state = CommentsMCPInbox.isSimulatorCaptureAllowed ? .on : .off
+        captureToggle.setAccessibilityIdentifier("settings.mcp.allowSimulatorCapture")
+        card.addRow(captureToggle)
+        card.addRow(SettingsUI.label("Runs only iOS Simulator / Android Emulator recipes saved on your image frames. These can launch apps, tap, type and swipe, then update the frame. Changes can be undone.", size: 11))
         return card
     }
     @objc private func changeMCPPermission(_ sender: NSButton) {
@@ -201,6 +206,9 @@ import UniformTypeIdentifiers
     }
     @objc private func changeFrameImagesPermission(_ sender: NSButton) {
         UserDefaults.standard.set(sender.state == .on, forKey: CommentsMCPInbox.frameImagesPermissionKey)
+    }
+    @objc private func changeSimulatorCapturePermission(_ sender: NSButton) {
+        UserDefaults.standard.set(sender.state == .on, forKey: CommentsMCPInbox.simulatorPermissionKey)
     }
     @objc private func refreshCodex() {
         guard isViewLoaded else { return }

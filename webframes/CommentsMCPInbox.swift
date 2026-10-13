@@ -10,11 +10,16 @@ import os
     static var isAllowed: Bool { UserDefaults.standard.bool(forKey: permissionKey) }
     static let frameImagesPermissionKey = "webframes.allowMCPUpdateFrameImages"
     static var areFrameImagesAllowed: Bool { UserDefaults.standard.bool(forKey: frameImagesPermissionKey) }
+    static let simulatorPermissionKey = "webframes.allowMCPSimulatorCapture"
+    static var isSimulatorCaptureAllowed: Bool { UserDefaults.standard.bool(forKey: simulatorPermissionKey) }
     /// Why the request folder could not be prepared, shown in Settings.
     private(set) static var unavailableReason: String?
     private weak var document: WebFramesDocument?
     private let permission: () -> Bool
     private let frameImagesPermission: () -> Bool
+    private let simulatorPermission: () -> Bool
+    private let captureService: SimulatorCapture
+    private var captureTask: Task<Void, Never>?
     private var busy = false
     private var started = false
     private var directory: URL?
@@ -33,11 +38,21 @@ import os
         let resolved: Bool
         let comments: [ExpectedComment]
         var frameImage: FrameImageUpdate? = nil
+        var simulatorCapture: SimulatorRequest? = nil
+        var simulatorCaptures: [SimulatorRequest]? = nil
     }
-    init(document: WebFramesDocument, permission: (() -> Bool)? = nil, frameImagesPermission: (() -> Bool)? = nil) {
+    struct SimulatorRequest: Codable {
+        let frameID: String
+        let beforeHash: String
+        let recipe: SimulatorCaptureRecipe
+    }
+    init(document: WebFramesDocument, permission: (() -> Bool)? = nil, frameImagesPermission: (() -> Bool)? = nil,
+         simulatorPermission: (() -> Bool)? = nil, captureService: SimulatorCapture? = nil) {
         self.document = document
         self.permission = permission ?? { CommentsMCPInbox.isAllowed }
         self.frameImagesPermission = frameImagesPermission ?? { CommentsMCPInbox.areFrameImagesAllowed }
+        self.simulatorPermission = simulatorPermission ?? { CommentsMCPInbox.isSimulatorCaptureAllowed }
+        self.captureService = captureService ?? .shared
     }
     static func directory(for project: URL) -> URL {
         let canonical = project.resolvingSymlinksInPath().standardizedFileURL.path
@@ -63,6 +78,7 @@ import os
     }
     func stop() {
         started = false
+        captureTask?.cancel(); captureTask = nil
         if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
         defaultsObserver = nil
         watcher?.cancel(); watcher = nil
@@ -71,7 +87,8 @@ import os
     /// Starts or stops watching to match the current permission.
     func updateActivation() {
         guard started, let directory else { return }
-        if permission() || frameImagesPermission() {
+        if !simulatorPermission() { captureTask?.cancel() }
+        if permission() || frameImagesPermission() || simulatorPermission() {
             guard watcher == nil else { return }
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -101,6 +118,7 @@ import os
 
     /// Validate the entire batch against current memory before changing any item.
     static func apply(_ request: Request, to document: WebFramesDocument, allowed: Bool, imagesAllowed: Bool = false, now: Date = Date()) throws {
+        guard request.simulatorCapture == nil, request.simulatorCaptures == nil else { throw SimulatorCapture.failure("Use the native capture request handler.") }
         guard request.deadline > now.timeIntervalSince1970, request.deadline <= now.timeIntervalSince1970 + 30 else {
             throw ConnectionSettingsError.message("Request expired. Read the comments again and retry.")
         }
@@ -162,7 +180,7 @@ import os
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
     private func drain() {
-        guard !busy, let document, let directory,
+        guard started, !busy, let document, let directory,
               let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey, .fileSizeKey]) else { return }
         for url in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }).prefix(200) {
             guard url.lastPathComponent.hasSuffix(".request.json") else { continue }
@@ -180,6 +198,64 @@ import os
                 }
                 try FileManager.default.removeItem(at: url)
                 guard request.id == id else { throw ConnectionSettingsError.message("Invalid request id.") }
+                if request.simulatorCaptures != nil {
+                    let frames = try Self.validateSimulatorBatchRequest(request, document: document, allowed: simulatorPermission())
+                    busy = true
+                    captureTask = Task { [weak self, weak document] in
+                        guard let self, let document else { return }
+                        let timeout = Task { [weak self] in
+                            do {
+                                try await Task.sleep(for: .seconds(max(0, request.deadline - Date().timeIntervalSince1970)))
+                                self?.captureTask?.cancel()
+                            } catch { }
+                        }
+                        defer { timeout.cancel(); self.busy = false; self.captureTask = nil; self.drain() }
+                        do {
+                            guard let projectURL = document.fileURL else { throw SimulatorCapture.failure("Save this project first.") }
+                            let results = try await SimulatorCaptureBatch.run(document: document, frames: frames, service: self.captureService, validateCommit: {
+                                guard self.started, self.simulatorPermission(), request.deadline > Date().timeIntervalSince1970 else {
+                                    throw SimulatorCapture.failure("Capture cancelled, permission revoked or request expired. No screenshots were applied.")
+                                }
+                            })
+                            if results.contains(where: \.updated) {
+                                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                                    document.save(to: projectURL, ofType: WebFramesDocument.fileTypeIdentifier, for: .saveOperation) {
+                                        if let error = $0 { continuation.resume(throwing: error) } else { continuation.resume() }
+                                    }
+                                }
+                            }
+                            let values = try JSONSerialization.jsonObject(with: JSONEncoder().encode(results))
+                            Self.reply(["ok": true, "updated": results.filter(\.updated).count, "results": values], to: reply)
+                        } catch { Self.reply(["error": error.localizedDescription], to: reply) }
+                    }
+                    return
+                }
+                if request.simulatorCapture != nil {
+                    let frame = try Self.validateSimulatorRequest(request, document: document, allowed: simulatorPermission())
+                    busy = true
+                    captureTask = Task { [weak self, weak document] in
+                        guard let self, let document, let capture = request.simulatorCapture else { return }
+                        defer { self.busy = false; self.captureTask = nil; self.drain() }
+                        do {
+                            let image = try await self.captureService.capture(capture.recipe)
+                            try Task.checkCancellation()
+                            _ = try Self.validateSimulatorRequest(request, document: document, allowed: self.simulatorPermission())
+                            guard let projectURL = document.fileURL else { throw SimulatorCapture.failure("Save this project first.") }
+                            // Put the complete image replacement into one explicit undo group: this task resumes outside a UI event.
+                            document.undoManager?.beginUndoGrouping()
+                            do { try document.applySimulatorCapture(image, frameID: frame.id, expected: frame) }
+                            catch { document.undoManager?.endUndoGrouping(); throw error }
+                            document.undoManager?.endUndoGrouping()
+                            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                                document.save(to: projectURL, ofType: WebFramesDocument.fileTypeIdentifier, for: .saveOperation) {
+                                    if let error = $0 { continuation.resume(throwing: error) } else { continuation.resume() }
+                                }
+                            }
+                            Self.reply(["ok": true, "frame_id": frame.id, "imageHash": Self.imageHash(image.data)], to: reply)
+                        } catch { Self.reply(["error": error.localizedDescription], to: reply) }
+                    }
+                    return
+                }
                 // Only the in-app preference grants permission. CLI arguments cannot bypass it.
                 try Self.apply(request, to: document, allowed: permission(), imagesAllowed: frameImagesPermission())
                 guard let projectURL = document.fileURL else { throw ConnectionSettingsError.message("Save this project first.") }
@@ -203,6 +279,32 @@ import os
                 try? FileManager.default.removeItem(at: url)
                 Self.reply(["error": error.localizedDescription], to: reply)
             }
+        }
+    }
+    static func validateSimulatorRequest(_ request: Request, document: WebFramesDocument, allowed: Bool, now: Date = Date()) throws -> FrameModel {
+        guard allowed else { throw ConnectionSettingsError.message("Simulator capture is disabled. Enable Allow agents to capture simulator screens in Settings.") }
+        guard request.deadline > now.timeIntervalSince1970, request.deadline <= now.timeIntervalSince1970 + 901,
+              request.frameImage == nil, request.simulatorCaptures == nil, request.comments.isEmpty, !request.resolved,
+              let capture = request.simulatorCapture, !capture.frameID.isEmpty, capture.frameID.count <= 200,
+              let frame = document.workspace.frames.first(where: { $0.id == capture.frameID }), frame.isImage,
+              frame.simulatorCapture == capture.recipe,
+              case .string(let url)? = frame.extras["imgUrl"], let data = imageBytes(url), imageHash(data) == capture.beforeHash else {
+            throw ConnectionSettingsError.message("The saved frame or simulator recipe changed, or the request expired. Read the frame and retry.")
+        }
+        try capture.recipe.validate()
+        return frame
+    }
+
+    static func validateSimulatorBatchRequest(_ request: Request, document: WebFramesDocument, allowed: Bool, now: Date = Date()) throws -> [FrameModel] {
+        guard request.simulatorCapture == nil, let captures = request.simulatorCaptures,
+              !captures.isEmpty, captures.count <= SimulatorCaptureBatch.limit,
+              Set(captures.map(\.frameID)).count == captures.count else {
+            throw SimulatorCapture.failure("Provide 1–\(SimulatorCaptureBatch.limit) unique saved capture frames.")
+        }
+        return try captures.map { capture in
+            var single = request
+            single.simulatorCaptures = nil; single.simulatorCapture = capture
+            return try validateSimulatorRequest(single, document: document, allowed: allowed, now: now)
         }
     }
     /// The status change is already saved when this runs; a lost reply would

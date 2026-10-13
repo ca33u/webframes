@@ -128,7 +128,8 @@ test('comments MCP reads package documents and their screenshot files', async ()
     version: 2, name: 'Package', frames: [{id: 'f1', label: 'Home', url: 'image://Home', w: 390, h: 844,
       isImage: true, imgUrl: `wf-image:images/${digest}.png`, imageUpdatedBy: 'MCP agent',
       flow: 'appId: app.essazanov.Comin\n---\n- launchApp\n- tapOn: Забыли пароль?',
-      deeplink: 'comin://recovery?screen=reset&token=private-token'}],
+      deeplink: 'comin://recovery?screen=reset&token=private-token',
+      simulatorCapture: {platform: 'android', deviceID: 'android-avd:Comin', deviceName:'Comin', appBundleID:'com.essazanov.comin', steps:[{action:'type', value:'private-token'}], build:{projectPath:'/Private/Comin/Android', module:'app', variant:'Debug'}, testState:{name:'Recovery', account:'private-account', data:{email:'private-email'}, theme:'dark', launchArguments:['private-argument'], preparation:[{action:'type',value:'private-setup'}], readySelector:'private-ready'}, deeplink:'comin://recovery?token=private-token'}}],
     annotations: [{id: 'a1', num: 1, frameId: 'f1', comment: 'Tighten spacing', resolved: false, xPct: 1, yPct: 2,
       color: 'blue', edits: {}, element: {selector: '.card', screenshot: `wf-image:images/${digest}.png`}}],
   }));
@@ -157,18 +158,36 @@ test('comments MCP reads package documents and their screenshot files', async ()
     assert.equal(frames[0].imageHash, digest);
     assert.equal(frames[0].flow, 'appId: app.essazanov.Comin\n---\n- launchApp\n- tapOn: Забыли пароль?');
     assert.equal(frames[0].deeplink, 'comin://recovery?screen=reset');
+    assert.equal(frames[0].simulatorCapture.stepCount, 1);
+    assert.equal(frames[0].simulatorCapture.platform, 'android');
+    assert.equal(frames[0].simulatorCapture.build.projectName, 'Android');
+    assert.equal(frames[0].simulatorCapture.build.variant, 'Debug');
+    assert.equal(JSON.stringify(frames[0].simulatorCapture).includes('/Private/'), false);
+    assert.equal(frames[0].simulatorCapture.deeplink, 'comin://recovery');
+    assert.deepEqual(frames[0].simulatorCapture.testState, {name:'Recovery', theme:'dark', dataKeys:['email'], preparationCount:1});
+    for (const secret of ['private-account','private-email','private-argument','private-setup','private-ready']) {
+      assert.equal(JSON.stringify(frames[0].simulatorCapture).includes(secret), false);
+    }
     const current = replies.find(r => r.id === 4).result;
     assert.equal(current.content[1].data, png.toString('base64'));
     assert.equal(JSON.parse(current.content[0].text).frame.imageUpdatedBy, 'MCP agent');
     assert.equal(JSON.parse(current.content[0].text).frame.flow, frames[0].flow);
     assert.equal(JSON.parse(current.content[0].text).frame.deeplink, frames[0].deeplink);
     const brief = replies.find(r => r.id === 7).result.content[0].text;
-    assert.match(brief, /run_flow.*screenshot.*update_frame_image/);
+    assert.match(brief, /capture_simulator_frame/);
     assert.match(brief, /keep the current frame image/);
     assert.ok(!JSON.stringify(replies).includes('private-token'));
     const updateTool = replies.find(r => r.id === 5).result.tools.find(tool => tool.name === 'update_frame_image');
     assert.deepEqual(updateTool.inputSchema.required, ['frame_id', 'image_path']);
     assert.equal(updateTool.annotations.readOnlyHint, false);
+    const captureTool = replies.find(r => r.id === 5).result.tools.find(tool => tool.name === 'capture_simulator_frame');
+    assert.deepEqual(captureTool.inputSchema.required, ['frame_id']);
+    assert.equal(captureTool.inputSchema.additionalProperties, false);
+    const batchTool = replies.find(r => r.id === 5).result.tools.find(tool => tool.name === 'capture_simulator_frames');
+    assert.deepEqual(batchTool.inputSchema.required, ['frame_ids']);
+    assert.equal(batchTool.inputSchema.properties.frame_ids.maxItems, 20);
+    assert.equal(batchTool.inputSchema.properties.frame_ids.uniqueItems, true);
+    assert.equal(batchTool.inputSchema.additionalProperties, false);
     assert.equal(replies.find(r => r.id === 6).result.isError, true);
   } finally {
     child.kill();

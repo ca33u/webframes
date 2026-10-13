@@ -4,6 +4,39 @@ User-facing changes, newest first. Sparkle release notes are generated from
 this file (see Tools/updates/README.md), so write entries for users, not for
 reviewers. Internal refactors and test-only changes do not belong here.
 
+## 1.1.8 (13) — 2026-10-13
+
+### Added
+- Save a named test state with each screen: account, test values, light/dark
+  theme, launch arguments and preparation actions. Record preparation in the
+  native preview, reuse values in actions, and check that the app is ready before
+  opening the screen. The device theme is restored when capture ends; failed
+  preparation keeps the previous screenshot.
+- Start a live preview inside the selected image frame. One native runner streams
+  the current iOS or Android screen without saving video or replacing the stored
+  screenshot. Changing selection, entering comment mode or hiding/closing the
+  window stops the preview. Other frames keep their last screenshots.
+- Build and update-install the app before recording or refreshing screens. Choose
+  an Xcode project/workspace and scheme, or a Gradle project, module and variant.
+  Project builds require separate local permission and preserve installed app data.
+- Record iOS and Android screen actions inside Web Frames. Click or swipe the
+  device preview and enter text to create a reusable scenario without typing
+  element selectors. Review and save the recording, or cancel to keep the old
+  action list.
+- Refresh selected screenshots or all saved screen recipes in batches of up to
+  20, mixing iOS and Android. Review per-screen results and undo successful
+  updates together. Cancel before apply keeps all original screenshots.
+  Agents can request the same batch with `capture_simulator_frames`.
+- Capture Android Emulator screens using the same saved recipes and Refresh
+  button as iOS. Supports Unicode text entry, resource ids and protected-screen
+  detection. Uses Android SDK/JDK locally, without tapflow or another account.
+- Capture iOS Simulator screens inside Web Frames without tapflow or an account.
+  Add a screenshot from the Image tab, or bind an existing image to a simulator
+  and installed app. Save button taps, waits, text entry, swipes and a deeplink;
+  refresh the same frame with Undo, comments and links preserved.
+- Agents can run your saved screen recipe with `capture_simulator_frame`.
+  Its separate permission is off by default. Xcode and an iOS runtime are required.
+
 ## 1.1.7 (12) — 2026-10-13
 
 ### Fixed

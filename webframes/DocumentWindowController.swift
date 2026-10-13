@@ -1312,6 +1312,8 @@ extension DocumentWindowController: NSMenuItemValidation {
         canvasHost.restackSelection(FrameStacking.allCases[item.tag])
     }
     @objc func createSection(_ sender: Any?) { canvasHost.createSectionFromSelection() }
+    @objc func refreshSelectedScreenshots(_ sender: Any?) { canvasHost.refreshSimulatorCaptures(all: false) }
+    @objc func refreshAllScreenshots(_ sender: Any?) { canvasHost.refreshSimulatorCaptures(all: true) }
     @objc func arrangeFrames(_ sender: Any?) {
         guard let item = sender as? NSMenuItem, FrameArrangement.allCases.indices.contains(item.tag) else { return }
         canvasHost.arrangeSelection(FrameArrangement.allCases[item.tag])
@@ -1352,6 +1354,10 @@ extension DocumentWindowController: NSMenuItemValidation {
         case #selector(createSection(_:)):
             // With frames selected it wraps them; otherwise it starts drawing.
             return canvasActionsEnabled
+        case #selector(refreshSelectedScreenshots(_:)):
+            return canvasActionsEnabled && canvasHost.simulatorBatchFrames(all: false).contains { $0.simulatorCapture != nil }
+        case #selector(refreshAllScreenshots(_:)):
+            return canvasActionsEnabled && !canvasHost.simulatorBatchFrames(all: true).isEmpty
         case #selector(arrangeFrames(_:)):
             guard FrameArrangement.allCases.indices.contains(menuItem.tag) else { return false }
             return canvasActionsEnabled && canvasHost.canArrange(FrameArrangement.allCases[menuItem.tag])

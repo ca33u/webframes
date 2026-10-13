@@ -6,7 +6,8 @@ with DOM context, and hand them to Codex or Claude Code for fixes you review
 before anything is written.
 
 Download the signed build at [webframes.pro](https://www.webframes.pro).
-Current release: **1.1.7 (12)**, Developer ID signed and Apple notarized.
+Current public release: **1.1.8 (13)**, Developer ID signed and Apple notarized,
+including the complete native iOS and Android simulator workflow.
 See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes.
 
 ## What you can do
@@ -17,14 +18,33 @@ See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes.
 - Collect variants in a section, choose the reference yourself and give the
   section a task for your coding agent.
 - Connect a local MCP client with the setup wizard. Comment status and screenshot
-  updates require separate permissions, both off by default.
-- Store a screen flow and deeplink on an image frame. Your external agent can
-  run the flow and replace that frame's screenshot; Undo and saved boards retain
-  the image you choose. Web Frames does not control an emulator itself.
+  updates and native simulator captures require separate permissions, each off by default.
+- Capture iOS Simulator and Android Emulator screens directly. Choose an app,
+  save tap/wait/type/swipe actions and refresh the same image frame with Undo.
+  Uses local Xcode or Android SDK/JDK; no tapflow account or external service. Agents can run the
+  saved recipe through `capture_simulator_frame` with a separate opt-in. Refresh
+  selected screens or all saved recipes in mixed iOS/Android batches, with
+  per-screen results and one Undo; agents use `capture_simulator_frames`.
+- Store legacy flow YAML and deeplinks for optional external runners too.
 - Align frames with magnetic guides and import screenshot batches as a grid.
 
 Component previews depend on the project's providers and sample data. Server
 authentication and database access may need a mock or the project's live page.
+
+Native simulator capture is included in 1.1.8. In Add Frames → Image, choose **Capture
+from Simulator…**, or select an image and use **Simulator capture settings**.
+Use **Refresh from simulator** to repeat its recipe. Choose iOS Simulator or
+Android Emulator in capture settings. Xcode/iOS runtime or Android SDK/JDK are
+required; Web Frames can start an existing simulator or emulator and control an
+installed app. It does not create backend accounts or execute arbitrary YAML. **Record Actions…** captures clicks, vertical swipes and text entry inside
+Web Frames, so screen scenarios can be assembled without typing selectors.
+**Test State…** saves an account label, test data, theme, launch arguments and
+preparation actions with the frame. **Start live preview** shows only the selected
+frame using its saved recipe, without saving video or replacing its screenshot.
+Enable **Build and install before capture** to rebuild an Xcode scheme or Gradle
+module/variant and update-install the app before recording or refreshing screens.
+Local build scripts require separate project permission; existing app data is kept.
+See the [Simulator Capture guide](docs/simulator-capture.md) for setup and agent permissions.
 
 ## Requirements
 

@@ -168,6 +168,8 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     // Frame selection and link selection are mutually exclusive: a
     // fresh frame click clears the link selection and vice-versa, so
     // Delete/Backspace has an unambiguous target.
+    var simulatorLiveFrameID: String?
+    var simulatorLiveToken: UUID?
     private(set) var selectedFrameId: String?
     private(set) var selectedFrameIDs: [String] = []
     var onFrameSelectionChanged: (() -> Void)?
@@ -1520,7 +1522,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     // PinEditorModal hides the thumb row until we call
     // `updateScreenshot`); on save we commit the draft through
     // `workspace.createAnnotation`; on cancel we drop it.
-    private(set) var annotationMode: Bool = false
+    private(set) var annotationMode: Bool = false { didSet { if annotationMode { stopSimulatorLive() } } }
 
     /// Snapshot held for an in-flight "brand-new pin" between the
     /// click-in-annotation-mode and the pin editor's save/cancel. The
@@ -2058,6 +2060,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil { stopSimulatorLive() }
         if window == nil, managedServerProcess != nil {
             pendingServerRestart = nil
             stopManagedServer()
@@ -2071,6 +2074,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     /// Called from `DocumentWindowController.windowWillClose` and from
     /// `applicationWillTerminate`. Idempotent.
     func tearDown() {
+        stopSimulatorLive()
         workspaceSubscription = nil
         webSourceMonitorTask?.cancel()
         webSourceMonitorTask = nil
@@ -2164,6 +2168,8 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
 
     private func refreshNativeViewsFromWorkspace() {
         guard let workspace = document?.workspace else { return }
+
+        if arrangementBar.superview != nil { updateArrangementBar() }
 
         updateWebSourceMonitor(for: workspace.projectMap)
 
@@ -2718,6 +2724,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         var seen = Set<String>()
         selectedFrameIDs = ids.filter { document?.workspace.frame(id: $0) != nil && seen.insert($0).inserted }
         selectedFrameId = selectedFrameIDs.last
+        if let live = simulatorLiveFrameID, selectedFrameIDs != [live] { stopSimulatorLive() }
         updateArrangementBar()
         selectedLinkId = nil;hoveredLinkId = nil
         for id in Set(previous + selectedFrameIDs) {bridge.repaintFrameChrome(id:id)}
@@ -2745,6 +2752,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     }
 
     private let arrangementBar = NSStackView()
+    private let batchCaptureButton = NSButton()
     private var arrangementButtons: [FrameArrangement: NSButton] = [:]
     private func updateArrangementBar() {
         if arrangementBar.superview == nil {
@@ -2782,6 +2790,17 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
             section.widthAnchor.constraint(equalToConstant: 30).isActive = true
             section.heightAnchor.constraint(equalToConstant: 28).isActive = true
             arrangementBar.addArrangedSubview(section)
+            batchCaptureButton.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "Update Selected Screenshots")
+            batchCaptureButton.target = self
+            batchCaptureButton.action = #selector(refreshSelectedSimulatorCaptures(_:))
+            batchCaptureButton.isBordered = false
+            batchCaptureButton.contentTintColor = WFDesign.text
+            batchCaptureButton.toolTip = "Update Selected Screenshots from Simulators"
+            batchCaptureButton.setAccessibilityLabel("Update Selected Screenshots")
+            batchCaptureButton.setAccessibilityIdentifier("canvas.capture.batch")
+            batchCaptureButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            batchCaptureButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            arrangementBar.addArrangedSubview(batchCaptureButton)
             arrangementBar.spacing = 2
             arrangementBar.wantsLayer = true
             arrangementBar.layer?.backgroundColor = WFDesign.bg2.cgColor
@@ -2794,6 +2813,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
                                          arrangementBar.centerXAnchor.constraint(equalTo: centerXAnchor)])
         }
         arrangementBar.isHidden = selectedFrameIDs.count < 2
+        batchCaptureButton.isHidden = !simulatorBatchFrames(all: false).contains { $0.simulatorCapture != nil }
         // Distributing needs three frames; with two the buttons are hidden
         // rather than shown greyed out, which read as broken.
         for (action, button) in arrangementButtons { button.isHidden = !canArrange(action) }
@@ -3072,6 +3092,42 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         document?.workspace.renameFrame(id: id, label: trimmed)
+    }
+
+    func editSimulatorCapture(id: String) {
+        guard let window, let document,
+              let frame = document.workspace.frames.first(where: { $0.id == id }), frame.isImage else { return }
+        SimulatorCaptureUI.settings(window: window, recipe: frame.simulatorCapture, save: { [weak document] recipe in
+            document?.workspace.setSimulatorCapture(id: id, recipe: recipe)
+        }, capture: { [weak self] _ in self?.refreshSimulatorCapture(id: id) })
+    }
+
+    func refreshSimulatorCapture(id: String) {
+        guard let window, let document,
+              let frame = document.workspace.frames.first(where: { $0.id == id }), frame.isImage else { return }
+        guard let recipe = frame.simulatorCapture else { editSimulatorCapture(id: id); return }
+        SimulatorCaptureUI.run(window: window, recipe: recipe) { [weak document] image in
+            guard let document, document.windowControllers.contains(where: { $0.window?.isVisible == true }) else { return }
+            try document.applySimulatorCapture(image, frameID: id, expected: frame)
+            if let url = document.fileURL {
+                document.save(to: url, ofType: WebFramesDocument.fileTypeIdentifier, for: .saveOperation) { error in
+                    if let error { Task { @MainActor in SimulatorCaptureUI.presentError(error, window: window) } }
+                }
+            }
+        }
+    }
+
+    func simulatorBatchFrames(all: Bool) -> [FrameModel] {
+        (document?.workspace.frames ?? []).filter {
+            $0.isImage && (all ? $0.simulatorCapture != nil : selectedFrameIDs.contains($0.id))
+        }
+    }
+
+    @objc private func refreshSelectedSimulatorCaptures(_ sender: Any?) { refreshSimulatorCaptures(all: false) }
+
+    func refreshSimulatorCaptures(all: Bool) {
+        guard let window, let document else { return }
+        SimulatorCaptureUI.runBatch(window: window, document: document, frames: simulatorBatchFrames(all: all))
     }
 
     func editFrameScreenRecipe(id: String) {

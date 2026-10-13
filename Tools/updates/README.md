@@ -6,9 +6,15 @@ Debug builds deliberately do not start Sparkle or replace the app from Xcode.
 Sparkle asks the user whether to check automatically; installation is not forced.
 
 Production feed: https://www.webframes.pro/updates/appcast.xml
-The current release is 1.1.7 (build 12), dated 13 October 2026. The site contains
+The current release is 1.1.8 (build 13), dated 13 October 2026. The site contains
 the signed archive and appcast under public/updates, with revalidation for the feed.
 Preserve published versioned files and never replace this feed with an empty one.
+
+Version 1.1.8 includes the complete native iOS and Android simulator workflow.
+Its notarized installer, signed update ZIP and release notes are published on
+the website. The production feed retains builds 12, 11 and 10; previous
+versioned downloads remain available. Local evidence and immutable artifacts
+are in `release/1.1.8-13-notarized`.
 
 The Ed25519 private key stays in macOS Keychain under account
 `app.essazanov.webframes`. Only the public key belongs in Info.plist.

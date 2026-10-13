@@ -20,6 +20,7 @@ ROOT_FILES = {'.gitignore', '.gitattributes', 'README.md', 'CHANGELOG.md',
               'CONTRIBUTING.md', 'SECURITY.md', 'LICENSE.md', 'Info.plist'}
 ROOT_DIRS = {'.github', 'Tools', 'Examples', 'webframes', 'webframesTests',
              'webframesUITests', 'webframes.xcodeproj'}
+PUBLIC_DOCS = {'docs/simulator-capture.md'}
 PRIVATE_PARTS = {'.git', '.codex', '.claude', '.codex-bridge', '.webframes-cache',
                  'node_modules', 'runtime-dist', 'build', 'release', 'DerivedData',
                  'xcuserdata', '__pycache__', '.DS_Store'}
@@ -55,7 +56,7 @@ def public_path(name):
         return False
     if p.parts[0] == 'docs' and len(p.parts) > 2 and p.parts[1] == 'images':
         return True
-    if (len(p.parts) == 1 and name in ROOT_FILES) or p.parts[0] in ROOT_DIRS:
+    if name in PUBLIC_DOCS or (len(p.parts) == 1 and name in ROOT_FILES) or p.parts[0] in ROOT_DIRS:
         return True
     raise ValueError(f'Unreviewed public path: {name}')
 

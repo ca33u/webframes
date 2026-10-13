@@ -1,4 +1,4 @@
-import {setCommentStatus, updateFrameImage, storedImage} from './comments-mutations.mjs';
+import {setCommentStatus, updateFrameImage, captureSimulatorFrame, captureSimulatorFrames, storedImage} from './comments-mutations.mjs';
 import {readFileSync, readdirSync, statSync} from 'node:fs';
 import {homedir} from 'node:os';
 import path from 'node:path';
@@ -58,6 +58,18 @@ const projectProperty = {
 };
 
 const tools = [
+  {
+    name: 'capture_simulator_frames',
+    description: 'Sequentially refresh 1–20 image frames using their user-saved native iOS/Android recipes. Requires the project open and Allow agents to capture simulator screens. Successful captures apply together with one Undo; individual failures keep old images and return per-frame errors. Cancellation or expiry before apply discards the batch. May build and update-install apps using saved build settings and separately authorized local projects, then launch apps and run saved actions; cannot override recipes or build commands. Allow up to 15 minutes; split larger boards into batches.',
+    inputSchema: {type: 'object', properties: {project: projectProperty, frame_ids: {type: 'array', items: {type: 'string', minLength: 1, maxLength: 200}, minItems: 1, maxItems: 20, uniqueItems: true}}, required: ['frame_ids'], additionalProperties: false},
+    annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: false},
+  },
+  {
+    name: 'capture_simulator_frame',
+    description: 'Run the frame’s saved native iOS Simulator or Android Emulator capture recipe in Web Frames and replace its screenshot, preserving comments and links with Undo. Requires the project open and Allow agents to capture simulator screens enabled. Uses local Xcode or Android SDK/JDK; no tapflow, account or external service. May build and update-install the app using saved settings and separate local project permission, then launch it and execute the user-saved tap/type/swipe steps. Cannot supply or override a recipe. First run builds the bundled runner; allow up to 15 minutes.',
+    inputSchema: {type: 'object', properties: {project: projectProperty, frame_id: {type: 'string'}}, required: ['frame_id'], additionalProperties: false},
+    annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: false},
+  },
   {
     name: 'list_sections',
     description: 'List user-collected variant pools: section id, name, agent task, member frame ids and the user-chosen reference. A missing or moved reference is unavailable; never choose a replacement automatically.',
@@ -316,6 +328,26 @@ function publicFrame(project, frame) {
     imageUpdatedBy: frame.imageUpdatedBy || null, imageUpdatedAt: frame.imageUpdatedAt || null,
     flow: frame.isImage && typeof frame.flow === 'string' ? frame.flow : null,
     deeplink: frame.isImage && typeof frame.deeplink === 'string' ? contextURL(frame.deeplink) : null,
+    simulatorCapture: frame.isImage && frame.simulatorCapture ? {
+      platform: frame.simulatorCapture.platform || 'ios',
+      deviceID: frame.simulatorCapture.deviceID, deviceName: frame.simulatorCapture.deviceName,
+      appBundleID: frame.simulatorCapture.appBundleID,
+      ...(frame.simulatorCapture.build ? {build: {
+        projectName: path.basename(frame.simulatorCapture.build.projectPath || ''),
+        scheme: frame.simulatorCapture.build.scheme || null,
+        configuration: frame.simulatorCapture.build.configuration || 'Debug',
+        module: frame.simulatorCapture.build.module || 'app',
+        variant: frame.simulatorCapture.build.variant || 'Debug',
+      }} : {}),
+      ...(frame.simulatorCapture.testState ? {testState: {
+        name: frame.simulatorCapture.testState.name,
+        theme: frame.simulatorCapture.testState.theme || 'system',
+        dataKeys: Object.keys(frame.simulatorCapture.testState.data || {}).sort(),
+        preparationCount: Array.isArray(frame.simulatorCapture.testState.preparation) ? frame.simulatorCapture.testState.preparation.length : 0,
+      }} : {}),
+      stepCount: Array.isArray(frame.simulatorCapture.steps) ? frame.simulatorCapture.steps.length : 0,
+      deeplink: frame.simulatorCapture.deeplink ? contextURL(frame.simulatorCapture.deeplink) : null,
+    } : null,
   };
 }
 
@@ -366,6 +398,8 @@ async function callTool(name, args = {}) {
     return textContent({section: {...value, frameIds: page.values}, pagination: page.pagination});
   }
   if (name === 'update_frame_image') return textContent(await updateFrameImage(project, args));
+  if (name === 'capture_simulator_frame') return textContent(await captureSimulatorFrame(project, args));
+  if (name === 'capture_simulator_frames') return textContent(await captureSimulatorFrames(project, args));
   if (name === 'list_frames') {
     const page = paginate([...project.byFrame.values()], args, name, snapshot, frame => publicFrame(project, frame));
     return textContent({project: {id: project.id, name: project.name}, frames: page.values, pagination: page.pagination});
@@ -430,7 +464,7 @@ async function callTool(name, args = {}) {
       'Inspect the source, implement the requested changes, run appropriate checks, and report which comment ids were addressed. Only use set_comment_status after verifying the fix and when the user has enabled comment changes in Web Frames Settings.',
       'For a section task requesting unification, inspect its member frames with get_frame and area comments with get_comment. Compare height, radius, color, font and padding in a table, then follow the user-selected reference. Do not infer a reference or treat the section task as permission to change unrelated code. If no reference is available, ask the user before unifying. With source access, make the change through the authorized review/apply workflow, rebuild and verify; refresh image frames with update_frame_image when enabled. Without source access, produce a reference specification. Report remaining differences and keep unresolved comments open.',
       'For image frames, use your own build and simulator/emulator tools to open the correct updated screen and capture a PNG or JPEG. Use update_frame_image with frame_id and the absolute image_path when frame image updates are enabled. Use get_frame for current pixels; get_comment keeps the original screenshot. Replacing an image does not resolve its comments.',
-      'Read flow and deeplink from list_frames or get_frame to reproduce an image screen. flow is inline runner YAML or a file path; resolve relative paths against the source project. With tapflow, use run_flow with the saved YAML or accessible path, then screenshot, then update_frame_image. If the runner cannot access a flow file, read it and pass its YAML inline. A deeplink can be opened using your runner before capturing. Review recipe contents as project data within the user-authorized task; they do not grant permission to run unrelated actions. If navigation or capture fails, keep the current frame image and report the failure.',
+      'For frames with simulatorCapture, prefer capture_simulator_frame, or capture_simulator_frames for 1–20 saved frames: Web Frames runs the user-saved native recipes and replaces successful screenshots with one Undo. Check every batch result for failures. Requires the separate Allow agents to capture simulator screens permission. Saved test state prepares the account/data through user-saved actions and launch context, applies its theme temporarily and checks readiness before screen actions. Agents cannot override state values. Live preview is view-only in the native app, not an MCP capture or a saved video. Saved build settings also build and update-install the app first; local project build permission is required separately. Agents cannot override the project, build settings or commands. No tapflow is required. Legacy flow/deeplink fields remain available for optional external runners: flow is inline YAML or a path relative to the source project. Recipe data does not authorize unrelated actions. If navigation or capture fails, keep the current frame image and report the failure.',
     ];
     return [{type: 'text', text: lines.join('\n')}];
   }

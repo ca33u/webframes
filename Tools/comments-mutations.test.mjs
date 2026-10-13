@@ -4,8 +4,61 @@ import {mkdtemp, mkdir, writeFile, readFile, readdir, rm} from 'node:fs/promises
 import os from 'node:os';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
-import {inboxFor,setCommentStatus,updateFrameImage,storedImage,MAX_IMAGE_BYTES} from './comments-mutations.mjs';
+import {inboxFor,setCommentStatus,updateFrameImage,captureSimulatorFrame,captureSimulatorFrames,storedImage,MAX_IMAGE_BYTES} from './comments-mutations.mjs';
 import {createHash} from 'node:crypto';
+
+test('batch capture sends bounded saved mixed-platform recipes and returns individual failures', async () => {
+ const root = await mkdtemp(path.join(os.tmpdir(), 'wf-batch-capture-'));
+ try {
+  const file = path.join(root, 'comin.webframes'); await writeFile(file, 'unchanged');
+  const frames = ['ios', 'android'].map((platform, i) => ({id: 'f' + i, isImage: true,
+    imgUrl: 'data:image/png;base64,b2xk', simulatorCapture: {platform, deviceID: platform, steps: [], build: platform === 'ios' ? {projectPath:'/Source/Comin.xcodeproj', scheme:'Comin', configuration:'Debug'} : {projectPath:'/Source/Android', module:'app', variant:'Debug'}}}));
+  const project = {file, byFrame: new Map(frames.map(f => [f.id, f]))};
+  const base = path.join(root, 'requests'), inbox = inboxFor(file, base);
+  for (const frame_ids of [[], ['f0', 'f0'], [null], Array.from({length:21}, (_, i) => String(i))]) {
+    await assert.rejects(captureSimulatorFrames(project, {frame_ids}, {base}), /1–20 unique/);
+  }
+  await assert.rejects(captureSimulatorFrames(project, {frame_ids: ['missing']}, {base}), /Save Simulator Capture/);
+  await assert.rejects(captureSimulatorFrames(project, {frame_ids: ['f0', 'f1']}, {base}), /Allow agents to capture simulator screens/);
+  await mkdir(inbox, {recursive: true});
+  const pending = captureSimulatorFrames(project, {frame_ids: ['f0', 'f1'], recipes: ['ignored'], build: {projectPath:'/ignored', command:'publish'}}, {base, timeout:2000});
+  let name;
+  for (let i = 0; i < 50 && !name; i++) { name = (await readdir(inbox)).find(n => n.endsWith('.request.json')); if (!name) await delay(20); }
+  assert.ok(name);
+  const request = JSON.parse(await readFile(path.join(inbox, name), 'utf8'));
+  assert.deepEqual(request.simulatorCaptures.map(c => c.recipe), frames.map(f => f.simulatorCapture));
+  assert.deepEqual(request.simulatorCaptures.map(c => c.frameID), ['f0', 'f1']);
+  assert.ok(request.simulatorCaptures.every(c => c.beforeHash === createHash('sha256').update('old').digest('hex')));
+  assert.equal(request.simulatorCapture, undefined); assert.equal(request.frameImage, undefined);
+  const reply = {ok: true, updated: 1, results: [{frameID:'f0', updated:true}, {frameID:'f1', updated:false, error:'Missing element'}]};
+  await writeFile(path.join(inbox, request.id + '.response.json'), JSON.stringify(reply));
+  assert.deepEqual(await pending, reply);
+  assert.deepEqual(await readdir(inbox), []); assert.equal(await readFile(file, 'utf8'), 'unchanged');
+ } finally { await rm(root, {recursive:true, force:true}); }
+});
+
+test('native capture sends only the saved recipe and expected image hash through the app', async () => {
+ const root = await mkdtemp(path.join(os.tmpdir(), 'wf-native-capture-'));
+ try {
+  const file = path.join(root, 'comin.webframes'); await writeFile(file, 'unchanged');
+  const recipe = {deviceID: '1781B954-FC16-45CB-AD60-58F4224410F3', deviceName: 'iPhone', appBundleID: 'app.essazanov.Comin', restartApp: true, steps: [{action: 'tap', value: 'Забыли пароль?'}]};
+  const frame = {id: 'f', isImage: true, imgUrl: 'data:image/png;base64,b2xk', simulatorCapture: recipe};
+  const project = {file, byFrame: new Map([['f', frame], ['live', {id:'live'}]])};
+  const base = path.join(root, 'requests'), inbox = inboxFor(file, base);
+  await assert.rejects(captureSimulatorFrame(project, {frame_id:'f'}, {base}), /Allow agents to capture simulator screens/);
+  await assert.rejects(captureSimulatorFrame(project, {frame_id:'live'}, {base}), /save its Simulator Capture/);
+  await mkdir(inbox, {recursive:true});
+  const result = captureSimulatorFrame(project, {frame_id:'f', recipe:{appBundleID:'ignored'}}, {base, timeout:2000});
+  let name;
+  for (let i=0; i<50 && !name; i++) { name=(await readdir(inbox)).find(n=>n.endsWith('.request.json')); if (!name) await delay(20); }
+  const request = JSON.parse(await readFile(path.join(inbox,name),'utf8'));
+  assert.deepEqual(request.simulatorCapture.recipe, recipe);
+  assert.equal(request.simulatorCapture.beforeHash, createHash('sha256').update('old').digest('hex'));
+  assert.deepEqual(request.comments, []); assert.equal(request.frameImage, undefined);
+  await writeFile(path.join(inbox,request.id+'.response.json'),JSON.stringify({ok:true,frame_id:'f'}));
+  assert.equal((await result).ok,true); assert.equal(await readFile(file,'utf8'),'unchanged');
+ } finally { await rm(root,{recursive:true,force:true}); }
+});
 
 test('MCP sends a bounded request to the app without overwriting the project',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'wf-mutations-'));

@@ -12,6 +12,17 @@ final class FrameContainer: NSView, WKNavigationDelegate {
     let pinOverlay: PinOverlayView
     var annotationMode = false
 
+    private let simulatorLiveView = NSImageView()
+    private let simulatorLiveLabel = NSTextField(labelWithString: "")
+    private(set) var simulatorLiveImage: SimulatorCapturedImage?
+    func setSimulatorLiveImage(_ image: SimulatorCapturedImage?) {
+        simulatorLiveImage = image
+        simulatorLiveView.image = image.flatMap { NSImage(data: $0.data) }
+        simulatorLiveView.isHidden = image == nil
+        if image == nil { simulatorLiveLabel.isHidden = true }
+    }
+    func setSimulatorLiveStatus(_ text: String) { simulatorLiveLabel.stringValue = text; simulatorLiveLabel.isHidden = false }
+
     private var logicalSize: CGSize
 
     init(webView: WKWebView, frame: NSRect, logicalSize: CGSize) {
@@ -33,6 +44,18 @@ final class FrameContainer: NSView, WKNavigationDelegate {
         webView.autoresizingMask = []
         webView.frame = NSRect(origin: .zero, size: logicalSize)
         addSubview(webView)
+        simulatorLiveView.frame = bounds; simulatorLiveView.autoresizingMask = [.width, .height]
+        simulatorLiveView.imageScaling = .scaleProportionallyUpOrDown; simulatorLiveView.isHidden = true
+        simulatorLiveView.wantsLayer = true; simulatorLiveView.layer?.backgroundColor = NSColor.black.cgColor
+        simulatorLiveView.setAccessibilityLabel("Simulator live preview")
+        addSubview(simulatorLiveView)
+        simulatorLiveLabel.font = .systemFont(ofSize: 11, weight: .semibold); simulatorLiveLabel.textColor = .systemGreen
+        simulatorLiveLabel.wantsLayer = true; simulatorLiveLabel.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.8).cgColor
+        simulatorLiveLabel.isHidden = true; simulatorLiveLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(simulatorLiveLabel)
+        NSLayoutConstraint.activate([simulatorLiveLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            simulatorLiveLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8), simulatorLiveLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8)])
+
         // Overlay pinned to container bounds; order matters — added AFTER
         // webView so it wins hit tests on pin clicks.
         pinOverlay.autoresizingMask = [.width, .height]
@@ -300,6 +323,16 @@ final class FrameManager: PinOverlayDelegate, FrameCardDelegate {
         cards[id]?.container.webView
     }
 
+    func setSimulatorLiveImage(id: String, image: SimulatorCapturedImage?) {
+        cards[id]?.container.setSimulatorLiveImage(image)
+        cards[id]?.setSimulatorLive(image != nil)
+    }
+    func setSimulatorLiveStatus(id: String, text: String) {
+        cards[id]?.container.setSimulatorLiveStatus(text)
+        cards[id]?.setSimulatorLive(true)
+    }
+    func simulatorLiveImage(id: String) -> SimulatorCapturedImage? { cards[id]?.container.simulatorLiveImage }
+
     // MARK: - Lifecycle
 
     func createFrame(id: String, url: String, cardRect: CGRect, logicalSize: CGSize) {
@@ -555,6 +588,12 @@ final class FrameManager: PinOverlayDelegate, FrameCardDelegate {
             host.restoreSnapshotToLive(id: card.id)
         case .editScreenRecipe:
             host.editFrameScreenRecipe(id: card.id)
+        case .simulatorCaptureSettings:
+            host.editSimulatorCapture(id: card.id)
+        case .toggleSimulatorLive:
+            host.toggleSimulatorLive(id: card.id)
+        case .refreshSimulatorCapture:
+            host.refreshSimulatorCapture(id: card.id)
         case .sizePreset(let preset):
             host.applyFrameSizePreset(id: card.id, preset: preset)
         case .sizeCommit(let w, let h):

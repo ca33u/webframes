@@ -438,6 +438,22 @@ final class WorkspaceStore {
         finish(.frameScreenRecipeChanged(previous: previous))
     }
 
+    func setSimulatorCapture(id: String, recipe: SimulatorCaptureRecipe?) {
+        guard let i = frames.firstIndex(where: { $0.id == id }), frames[i].isImage,
+              frames[i].simulatorCapture != recipe else { return }
+        let previous = frames[i]
+        frames[i].simulatorCapture = recipe
+        finish(.frameScreenRecipeChanged(previous: previous))
+    }
+
+    func restoreScreenRecipe(_ old: FrameModel) {
+        guard let i = frames.firstIndex(where: { $0.id == old.id }), frames[i].isImage else { return }
+        let previous = frames[i]
+        frames[i].flow = old.flow; frames[i].deeplink = old.deeplink
+        frames[i].extras["simulatorCapture"] = old.extras["simulatorCapture"]
+        finish(.frameScreenRecipeChanged(previous: previous))
+    }
+
     /// Deletes a frame *and* cascades: removes annotations belonging to
     /// the frame and any links that reference it on either end. Matches
     /// JS `deleteFrame` at index.html ~line 1946.
@@ -536,12 +552,16 @@ final class WorkspaceStore {
 
     /// Replaces only the chosen frame's pixels. Comment screenshots remain the original evidence.
     func updateAgentFrameImage(id: String, dataURL: String, pixelSize: CGSize, date: Date) {
+        updateFrameImage(id: id, dataURL: dataURL, pixelSize: pixelSize, date: date, actor: "MCP agent")
+    }
+
+    func updateFrameImage(id: String, dataURL: String, pixelSize: CGSize, date: Date, actor: String) {
         guard let i = frames.firstIndex(where: { $0.id == id }), frames[i].isImage else { return }
         let previous = frames[i]
         frames[i].extras["imgUrl"] = .string(dataURL)
         frames[i].extras["natW"] = .number(Double(pixelSize.width))
         frames[i].extras["natH"] = .number(Double(pixelSize.height))
-        frames[i].extras["imageUpdatedBy"] = .string("MCP agent")
+        frames[i].extras["imageUpdatedBy"] = .string(actor)
         frames[i].extras["imageUpdatedAt"] = .string(ISO8601DateFormatter().string(from: date))
         frames[i].filePath = nil // the imported source file no longer represents these pixels
         finish(.frameImageUpdated(previous: previous))

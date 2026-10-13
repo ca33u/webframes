@@ -479,7 +479,7 @@ extension WebFramesDocument: WorkspaceStoreDelegate {
 
         case .frameScreenRecipeChanged(let previous):
             undoManager.registerUndo(withTarget: self) {
-                $0.workspace.setFrameScreenRecipe(id: previous.id, flow: previous.flow, deeplink: previous.deeplink)
+                $0.workspace.restoreScreenRecipe(previous)
             }
             undoManager.setActionName("Edit Screen Flow")
 

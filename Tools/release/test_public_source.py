@@ -26,6 +26,7 @@ class PublicSourceTests(unittest.TestCase):
                      'Tools/connection.json', 'webframes/key.pem', 'webframes.xcodeproj/xcuserdata/a']:
             self.assertFalse(public.public_path(path), path)
         self.assertTrue(public.public_path('Tools/release/prepare_public_source.py'))
+        self.assertTrue(public.public_path('docs/simulator-capture.md'))
         self.assertTrue(public.public_path('docs/images/canvas.png'))
 
     def test_unsafe_or_unreviewed_paths_fail(self):

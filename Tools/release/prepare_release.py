@@ -78,6 +78,18 @@ you enable Allow agents to resolve comments in Settings. Source changes require 
 To refresh screenshots through MCP, enable Allow agents to update frame images
 in Settings. Your coding agent captures the emulator and replaces the existing
 image frame; Undo restores its previous image.
+
+For native iOS/Android screenshots: Add Frames > Image > Capture from Simulator,
+or select an image and open Simulator capture settings. Choose an app and save
+its screen actions. Record Actions creates scenarios through the native preview.
+Build and install before capture can rebuild an Xcode scheme or Gradle variant;
+local project builds require separate permission. Xcode/iOS runtime or Android
+SDK/JDK are required on your Mac. No tapflow account or token is needed.
+Test State saves account/data/theme preparation with the screen. Use test values,
+not passwords. Start live preview shows only the selected frame without saving
+video or changing the stored screenshot. Batch refresh and agent capture reuse
+your saved recipes; Allow agents to capture simulator screens is separate from
+external image updates and is off by default.
 Check for Updates is in the Web Frames menu.
 ''')
     name = f"WebFrames-{info['CFBundleShortVersionString']}-{info['CFBundleVersion']}-arm64"

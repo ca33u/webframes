@@ -10,6 +10,40 @@ export function inboxFor(file, base = path.join(homedir(), 'Library/Application 
 }
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
+export async function captureSimulatorFrame(project, args, options = {}) {
+  if (typeof args.frame_id !== 'string' || !args.frame_id || args.frame_id.length > 200) {
+    throw Error('Provide an image frame_id with a saved Simulator Capture recipe.');
+  }
+  const frame = project.byFrame.get(args.frame_id);
+  if (!frame?.isImage || !frame.simulatorCapture || typeof frame.simulatorCapture !== 'object') {
+    throw Error('Choose an image frame and save its Simulator Capture settings in Web Frames first.');
+  }
+  const previous = storedImage(frame.imgUrl, project.packageRoot);
+  if (!previous) throw Error('Could not read the current frame image. Reimport it in Web Frames first.');
+  return sendRequest(project, {comments: [], resolved: false,
+    simulatorCapture: {frameID: frame.id, beforeHash: previous.hash, recipe: frame.simulatorCapture}},
+    {timeout: 900000, ...options, setting: 'Allow agents to capture simulator screens'});
+}
+
+export async function captureSimulatorFrames(project, args, options = {}) {
+  if (!Array.isArray(args.frame_ids) || !args.frame_ids.length || args.frame_ids.length > 20 ||
+      args.frame_ids.some(id => typeof id !== 'string' || !id || id.length > 200) ||
+      new Set(args.frame_ids).size !== args.frame_ids.length) {
+    throw Error('Provide 1–20 unique image frame_ids with saved Simulator Capture recipes.');
+  }
+  const simulatorCaptures = args.frame_ids.map(id => {
+    const frame = project.byFrame.get(id);
+    if (!frame?.isImage || !frame.simulatorCapture || typeof frame.simulatorCapture !== 'object') {
+      throw Error(`Save Simulator Capture settings for frame ${id} in Web Frames first.`);
+    }
+    const previous = storedImage(frame.imgUrl, project.packageRoot);
+    if (!previous) throw Error(`Could not read the current image for frame ${id}. Reimport it first.`);
+    return {frameID: id, beforeHash: previous.hash, recipe: frame.simulatorCapture};
+  });
+  return sendRequest(project, {comments: [], resolved: false, simulatorCaptures},
+    {timeout: 900000, ...options, setting: 'Allow agents to capture simulator screens'});
+}
+
 // In-memory data URLs and content-addressed package images have the same byte hash.
 export function storedImage(value, packageRoot) {
   if (typeof value !== 'string') return null;

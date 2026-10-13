@@ -84,7 +84,7 @@ import Testing
         try Data(#"{"name":"MCP QA","frames":[],"annotations":[]}"#.utf8).write(to: file)
         let configuration = try ClaudeMCPConfiguration.resolve(projectURL: file)
         let status = try await MCPConnectionProbe.check(configuration)
-        #expect(status.contains("Connected") && status.contains("10 tools") && status.contains("1 saved projects"))
+        #expect(status.contains("Connected") && status.contains("12 tools") && status.contains("1 saved projects"))
         try FileManager.default.removeItem(at: file)
         await #expect(throws: (any Error).self) { try await MCPConnectionProbe.check(configuration) }
     }

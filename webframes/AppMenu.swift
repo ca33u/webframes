@@ -178,6 +178,9 @@ enum AppMenu {
                                  keyEquivalent: "s")
         section.keyEquivalentModifierMask = [.shift]
         arrangeMenu.addItem(section)
+        arrangeMenu.addItem(.separator())
+        arrangeMenu.addItem(NSMenuItem(title: "Update Selected Screenshots…", action: #selector(DocumentWindowController.refreshSelectedScreenshots(_:)), keyEquivalent: ""))
+        arrangeMenu.addItem(NSMenuItem(title: "Update All Simulator Screenshots…", action: #selector(DocumentWindowController.refreshAllScreenshots(_:)), keyEquivalent: ""))
         arrangeItem.submenu = arrangeMenu
 
         // Window

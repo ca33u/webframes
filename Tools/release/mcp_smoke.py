@@ -56,7 +56,13 @@ def main():
             assert request('initialize', dict(protocolVersion='2024-11-05', capabilities={}, clientInfo=dict(name='Python stdio QA', version='1')))['serverInfo']['version'] == '0.2.0'
             child.stdin.write(json.dumps(dict(jsonrpc='2.0', method='notifications/initialized'))+'\n'); child.stdin.flush()
             tools = request('tools/list')['tools']
-            assert len(tools) == 10
+            expected_tools = {
+                'list_projects', 'list_frames', 'get_frame', 'list_comments', 'get_comment',
+                'get_agent_brief', 'set_comment_status', 'list_sections', 'get_section',
+                'update_frame_image', 'capture_simulator_frame', 'capture_simulator_frames',
+            }
+            assert len(tools) == len(expected_tools) and {tool['name'] for tool in tools} == expected_tools
+            print('PASS: packaged MCP advertises all 12 tools, including saved native single/batch capture', flush=True)
             for name, key, total, scope in [('list_projects','projects',261,{}), ('list_frames','frames',350,dict(project=board.stem)), ('list_comments','comments',950,dict(project=board.stem,status='all')), ('list_sections','sections',261,dict(project=board.stem))]:
                 cursor, ids, pages = None, [], 0
                 while True:

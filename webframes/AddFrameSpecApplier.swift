@@ -132,11 +132,17 @@ enum AddFrameSpecApplier {
                 // imgUrl / natW / natH carried through `extras` — same
                 // slot JS-originated image frames used, so a round-trip
                 // through `DocumentPayload` is identity.
-                let extras: [String: JSONValue] = [
+                var extras: [String: JSONValue] = [
                     "imgUrl": .string(dataURL),
                     "natW":   .number(natW),
                     "natH":   .number(natH),
                 ]
+                if let recipe = item["simulatorCapture"], JSONSerialization.isValidJSONObject(recipe),
+                   let data = try? JSONSerialization.data(withJSONObject: recipe),
+                   let typed = try? JSONDecoder().decode(SimulatorCaptureRecipe.self, from: data),
+                   (try? typed.validate()) != nil {
+                    extras["simulatorCapture"] = typed.jsonValue
+                }
                 return FrameModel(
                     id: generateId(),
                     url: "image://\(frameLabel)",

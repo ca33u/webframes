@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.essazanov.webframes.capture">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <application android:label="Web Frames Capture" android:debuggable="true" android:allowBackup="false" />
+    <instrumentation android:name="app.essazanov.webframes.capture.CaptureInstrumentation"
+        android:targetPackage="app.essazanov.webframes.capture" android:label="Web Frames Capture" />
+</manifest>

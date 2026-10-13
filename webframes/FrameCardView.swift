@@ -46,6 +46,9 @@ enum FrameCardIntent {
     case freezeSnapshot
     case restoreLive
     case editScreenRecipe
+    case simulatorCaptureSettings
+    case refreshSimulatorCapture
+    case toggleSimulatorLive
     case sizePreset(String)           // "desktop" | "mobile"
     case sizeCommit(w: CGFloat, h: CGFloat)
     case titleCommit(String)
@@ -255,6 +258,9 @@ final class FrameCardView: NSView {
         toolbar.onFreezeSnapshot = { forward(.freezeSnapshot) }
         toolbar.onRestoreLive = { forward(.restoreLive) }
         toolbar.onScreenRecipe = { forward(.editScreenRecipe) }
+        toolbar.onSimulatorSettings = { forward(.simulatorCaptureSettings) }
+        toolbar.onSimulatorRefresh = { forward(.refreshSimulatorCapture) }
+        toolbar.onSimulatorLive = { forward(.toggleSimulatorLive) }
         toolbar.onPreset = { forward(.sizePreset($0)) }
         toolbar.onSizeCommit = { [weak self] w, h in
             guard let s = self?.chrome else { return }
@@ -285,6 +291,8 @@ final class FrameCardView: NSView {
     /// ghost left the frame and, dropped on the canvas, became a duplicate.
     /// It sits under the pin overlay (pins stay clickable) and steps aside
     /// in comment mode so clicks place pins.
+    func setSimulatorLive(_ active: Bool) { toolbar.setSimulatorLive(active) }
+
     private func updateBodyDrag(isImage: Bool, annotationMode: Bool) {
         let wanted = isImage && !annotationMode
         if wanted, bodyDragView.superview == nil {
@@ -747,6 +755,9 @@ private final class FrameToolbarView: NSView {
     var onFreezeSnapshot: (() -> Void)?
     var onRestoreLive: (() -> Void)?
     var onScreenRecipe: (() -> Void)?
+    var onSimulatorSettings: (() -> Void)?
+    var onSimulatorRefresh: (() -> Void)?
+    var onSimulatorLive: (() -> Void)?
     var onPreset: ((String) -> Void)?
     /// Callback receives the committed width/height; nil for the axis
     /// that didn't change.
@@ -758,6 +769,9 @@ private final class FrameToolbarView: NSView {
     private let backButton    = IconActionButton(symbol: "chevron.backward")
     private let snapshotButton = IconActionButton(symbol: "camera")
     private let screenRecipeButton = IconActionButton(symbol: "point.topleft.down.to.point.bottomright.curvepath")
+    private let simulatorSettingsButton = IconActionButton(symbol: "iphone")
+    private let simulatorRefreshButton = IconActionButton(symbol: "arrow.clockwise")
+    private let simulatorLiveButton = IconActionButton(symbol: "dot.radiowaves.left.and.right")
     private let desktopButton = IconToggleButton(symbol: "desktopcomputer")
     private let mobileButton  = IconToggleButton(symbol: "iphone")
     private let widthField    = NumericField()
@@ -798,6 +812,16 @@ private final class FrameToolbarView: NSView {
         screenRecipeButton.translatesAutoresizingMaskIntoConstraints = false
         screenRecipeButton.toolTip = "Edit screen flow…"
         screenRecipeButton.setAccessibilityLabel("Edit screen flow")
+        simulatorSettingsButton.translatesAutoresizingMaskIntoConstraints = false
+        simulatorSettingsButton.toolTip = "Simulator capture settings…"
+        simulatorSettingsButton.setAccessibilityLabel("Simulator capture settings")
+        simulatorLiveButton.translatesAutoresizingMaskIntoConstraints = false
+        simulatorLiveButton.toolTip = "Start live preview (selected frame only)"
+        simulatorLiveButton.setAccessibilityLabel("Start live preview")
+        simulatorLiveButton.setAccessibilityIdentifier("capture.live")
+        simulatorRefreshButton.translatesAutoresizingMaskIntoConstraints = false
+        simulatorRefreshButton.toolTip = "Refresh from simulator"
+        simulatorRefreshButton.setAccessibilityLabel("Refresh from simulator")
         desktopButton.translatesAutoresizingMaskIntoConstraints = false
         mobileButton.translatesAutoresizingMaskIntoConstraints = false
         widthField.translatesAutoresizingMaskIntoConstraints = false
@@ -812,6 +836,12 @@ private final class FrameToolbarView: NSView {
             snapshotButton.heightAnchor.constraint(equalToConstant: iconSize),
             screenRecipeButton.widthAnchor.constraint(equalToConstant: iconSize),
             screenRecipeButton.heightAnchor.constraint(equalToConstant: iconSize),
+            simulatorSettingsButton.widthAnchor.constraint(equalToConstant: iconSize),
+            simulatorSettingsButton.heightAnchor.constraint(equalToConstant: iconSize),
+            simulatorLiveButton.widthAnchor.constraint(equalToConstant: iconSize),
+            simulatorLiveButton.heightAnchor.constraint(equalToConstant: iconSize),
+            simulatorRefreshButton.widthAnchor.constraint(equalToConstant: iconSize),
+            simulatorRefreshButton.heightAnchor.constraint(equalToConstant: iconSize),
             desktopButton.widthAnchor.constraint(equalToConstant: iconSize),
             desktopButton.heightAnchor.constraint(equalToConstant: iconSize),
             mobileButton.widthAnchor.constraint(equalToConstant: iconSize),
@@ -832,7 +862,7 @@ private final class FrameToolbarView: NSView {
             pill.heightAnchor.constraint(equalToConstant: pillHeight).isActive = true
         }
 
-        navPill.contentView   = Self.pillContent([backButton, snapshotButton, screenRecipeButton], insets: 4)
+        navPill.contentView   = Self.pillContent([backButton, snapshotButton, simulatorSettingsButton, simulatorRefreshButton, simulatorLiveButton, screenRecipeButton], insets: 4)
         sizePill.contentView  = Self.pillContent([desktopButton, mobileButton,
                                                   widthField, aspectLock, heightField],
                                                  insets: 6)
@@ -861,6 +891,9 @@ private final class FrameToolbarView: NSView {
 
         backButton.onClick    = { [weak self] in self?.onBack?() }
         screenRecipeButton.onClick = { [weak self] in self?.onScreenRecipe?() }
+        simulatorSettingsButton.onClick = { [weak self] in self?.onSimulatorSettings?() }
+        simulatorRefreshButton.onClick = { [weak self] in self?.onSimulatorRefresh?() }
+        simulatorLiveButton.onClick = { [weak self] in self?.onSimulatorLive?() }
         snapshotButton.onClick = { [weak self] in
             guard let self else { return }
             if self.snapshotRestoresLive { self.onRestoreLive?() }
@@ -900,11 +933,19 @@ private final class FrameToolbarView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    func setSimulatorLive(_ active: Bool) {
+        simulatorLiveButton.toolTip = active ? "Stop live preview" : "Start live preview (selected frame only)"
+        simulatorLiveButton.setAccessibilityLabel(active ? "Stop live preview" : "Start live preview")
+    }
+
     func apply(state: FrameCardState, mobileBreakpoint: CGFloat) {
         // Images expose their screen recipe; frozen snapshots also offer
         // a one-click route back to the original live website.
         backButton.isHidden = state.isImage
         screenRecipeButton.isHidden = !state.isImage
+        simulatorSettingsButton.isHidden = !state.isImage
+        simulatorRefreshButton.isHidden = !state.isImage
+        simulatorLiveButton.isHidden = !state.isImage
         snapshotButton.isHidden = state.isImage && !state.canRestoreLive
         snapshotRestoresLive = state.canRestoreLive
         snapshotButton.symbolName = state.canRestoreLive ? "globe" : "camera"

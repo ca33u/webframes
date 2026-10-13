@@ -177,6 +177,10 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
     /// half-built FrameCardState here would clobber the card with
     /// zeros. The very next JS push will carry the full baseline and
     /// the selection overlay will kick in then.
+    func setSimulatorLiveImage(id: String, image: SimulatorCapturedImage?) { frameManager.setSimulatorLiveImage(id: id, image: image) }
+    func setSimulatorLiveStatus(id: String, text: String) { frameManager.setSimulatorLiveStatus(id: id, text: text) }
+    func simulatorLiveImage(id: String) -> SimulatorCapturedImage? { frameManager.simulatorLiveImage(id: id) }
+
     func repaintFrameChrome(id: String) {
         guard lastFrameCardState[id] != nil else { return }
         frameManager.setCardChrome(id: id, state: renderCardState(for: id))

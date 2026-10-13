@@ -25,7 +25,7 @@ enum ProjectStorage {
             return dir
         }
         if environment["XCTestConfigurationFilePath"] != nil {
-            let dir = fm.temporaryDirectory.appendingPathComponent("WebFramesTests-Projects", isDirectory: true)
+            let dir = fm.temporaryDirectory.appendingPathComponent("WebFramesTests-Projects-" + UUID().uuidString, isDirectory: true)
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
             // /var/folders is a symlink to /private/var/folders; directory
             // listings return the real path, so use it here too.

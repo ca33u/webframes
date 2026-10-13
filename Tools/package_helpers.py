@@ -18,6 +18,11 @@ dest = contents / 'Resources/Tools'
 dest.mkdir(parents=True, exist_ok=True)
 for name in ('codex-bridge.mjs', 'context-mcp.mjs', 'comments-mcp.mjs', 'comments-mutations.mjs'):
     shutil.copy2(root / 'Tools' / name, dest / name)
+runner = dest / 'SimulatorCapture'
+if runner.exists():
+    shutil.rmtree(runner)
+shutil.copytree(root / 'Tools/SimulatorCapture', runner,
+                ignore=shutil.ignore_patterns('xcuserdata', '.DS_Store'))
 target = dest / 'component-catalog'
 if target.exists():
     shutil.rmtree(target)

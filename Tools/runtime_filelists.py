@@ -6,6 +6,10 @@ def generate(root):
     pairs = []
     for name in ('codex-bridge.mjs', 'context-mcp.mjs', 'comments-mcp.mjs', 'comments-mutations.mjs'):
         pairs.append((root / name, Path('Resources/Tools') / name))
+    runner = root / 'SimulatorCapture'
+    for item in [runner] + list(runner.rglob('*')):
+        if 'xcuserdata' not in item.parts:
+            pairs.append((item, Path('Resources/Tools/SimulatorCapture') / item.relative_to(runner)))
     catalog = root / 'component-catalog'
     for name in ('server.mjs','project-postcss.mjs','preview-boundaries.mjs','discover.mjs','package.json','package-lock.json','client','node_modules'):
         path = catalog / name

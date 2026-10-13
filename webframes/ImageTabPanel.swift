@@ -68,7 +68,7 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
     private let previewWrap = NSView()
     private let labelField = NSTextField()
 
-    private struct Pending { let name: String; let image: NSImage; let dataURL: String; let natW: Int; let natH: Int }
+    private struct Pending { let name: String; let image: NSImage; let dataURL: String; let natW: Int; let natH: Int; var recipe: SimulatorCaptureRecipe? = nil }
     private var pending: [Pending] = []
 
     private let onValidityChange: () -> Void
@@ -113,7 +113,8 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
         labelField.font = .systemFont(ofSize: 13)
         labelField.translatesAutoresizingMaskIntoConstraints = false
 
-        let root = NSStackView(views: [dropView, previewWrap, makeFieldLabel("Frame name (optional)"), labelField])
+        let capture = NSButton(title: "Capture from Simulator…", target: self, action: #selector(captureSimulator))
+        let root = NSStackView(views: [capture, dropView, previewWrap, makeFieldLabel("Frame name (optional)"), labelField])
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 10
@@ -148,6 +149,18 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
         } else if panel.runModal() == .OK {
             addFilesFromURLs(panel.urls)
         }
+    }
+
+    @objc private func captureSimulator() {
+        guard let window else { return }
+        SimulatorCaptureUI.settings(window: window, recipe: nil, save: { _ in }, allowSaveOnly: false, capture: { [weak self] recipe in
+            SimulatorCaptureUI.run(window: window, recipe: recipe) { [weak self] capture in
+                guard let self, let image = NSImage(data: capture.data) else { return }
+                self.pending.append(Pending(name: recipe.appBundleID.isEmpty ? recipe.deviceName : recipe.appBundleID,
+                    image: image, dataURL: capture.dataURL, natW: capture.width, natH: capture.height, recipe: recipe))
+                self.rebuildPreviews(); self.onValidityChange()
+            }
+        })
     }
 
     private func addFilesFromURLs(_ urls: [URL]) {
@@ -210,12 +223,15 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
         guard !pending.isEmpty else { return nil }
         let label = labelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let images: [[String: Any]] = pending.map {
-            [
+            var item: [String: Any] = [
                 "name":    $0.name,
                 "dataURL": $0.dataURL,
                 "natW":    $0.natW,
                 "natH":    $0.natH,
             ]
+            if let recipe = $0.recipe, let data = try? JSONEncoder().encode(recipe),
+               let object = try? JSONSerialization.jsonObject(with: data) { item["simulatorCapture"] = object }
+            return item
         }
         var spec: [String: Any] = ["kind": "image", "images": images]
         if !label.isEmpty { spec["label"] = label }
