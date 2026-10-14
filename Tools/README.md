@@ -4,7 +4,7 @@ Compare and Fix comments run through a coding agent chosen in **Settings → Cod
 
 ## Comments MCP for Codex and Claude Code
 
-`comments-mcp.mjs` is a separate, read-only-by-default MCP server for the comments and frames saved in Web Frames projects. It exposes ten tools:
+`comments-mcp.mjs` is a separate, read-only-by-default MCP server for the comments and frames saved in Web Frames projects. It exposes twelve tools:
 
 - `list_projects` — find saved Web Frames projects and unresolved counts.
 - `list_sections` — read manually collected pools, their tasks, member ids and chosen references.
@@ -13,9 +13,11 @@ Compare and Fix comments run through a coding agent chosen in **Settings → Cod
 - `get_comment` — read one full comment and return its attached screenshot when available.
 - `get_agent_brief` — produce a compact implementation brief for a coding agent.
 - `set_comment_status` — resolve or reopen comments in an open project; off until **Allow agents to resolve comments** is enabled (see below).
-- `list_frames` — list frame ids, types, dimensions, current image hashes and screen recipes (`flow`/`deeplink`).
+- `list_frames` — list frame ids, types, dimensions, current image hashes, native `simulatorCapture` recipe summaries and legacy `flow`/`deeplink` fields.
 - `get_frame` — inspect a frame and its current image, including an updated screenshot.
 - `update_frame_image` — replace one existing image frame with a captured PNG/JPEG; off until **Allow agents to update frame images** is enabled.
+- `capture_simulator_frame` — run one user-saved native iOS/Android recipe and update its image; off until **Allow agents to capture simulator screens** is enabled.
+- `capture_simulator_frames` — run 1–20 saved recipes, with per-frame results and one Undo for successful updates; uses the same native capture permission.
 
 In **Settings → Claude · MCP → Set up MCP…**, choose Claude Desktop, Claude Code
 or another stdio client, and one saved board or all boards. **Test connection**
@@ -30,7 +32,7 @@ and `/mcp` in Claude Code. Other clients get a config to copy.
 **Copy Desktop config** and **Copy Code command** remain available. Generated
 configuration points to Node and the MCP helper inside the installed app; no
 separate Node installation is needed. Keep Web Frames in Applications before
-setup so client paths stay valid. Setup does not enable comment or image writes.
+setup so client paths stay valid. Setup does not enable comment writes, image updates or native captures.
 
 Client config formats/scopes follow the [Claude Code reference](https://code.claude.com/docs/en/mcp)
 and [MCP local-server guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers).
@@ -66,10 +68,10 @@ To expose only one Web Frames document, append `--project /absolute/path/to/proj
 
 ## Fix with your agent
 
-The Comments sidebar shows **Fix with Codex** (or **Fix with Claude**, after the chosen agent) whenever the document has open comments. It uses the same paired local connector and saved ChatGPT/Codex sign-in as visual comparison:
+The Comments sidebar shows **Fix with Codex** (or **Fix with Claude**, after the chosen agent) whenever the document has open comments. It uses the same paired local connector and the chosen agent’s saved sign-in as visual comparison:
 
 1. Import the source project so the Web Frames document has a source root.
-2. Connect the local Codex connector once from comparison settings.
+2. Choose Codex or Claude Code in **Settings → Coding agent** and connect it.
 3. Add one or more comments and choose **Fix with Codex**.
 4. Codex reads a bounded source snapshot and returns exact replacements for existing HTML, CSS, JS/JSX, TS/TSX or JSON files. It cannot write source through the connector; only Apply in Web Frames writes.
 5. Review the proposed files and replacements, then explicitly Apply or discard them.
@@ -81,7 +83,13 @@ A single reviewed operation is limited to 8 existing files, 8 replacements per f
 `set_comment_status` accepts `{ "project": "project-id", "ids": ["comment-id"], "resolved": true }`.
 Use `false` to reopen. Permission is off by default and checked on every request. Keep the project open in Web Frames. A deleted or edited comment rejects the whole batch; read comments again before retrying. The request inbox is under `~/Library/Application Support/Web Frames/MCP Requests/` in per-project directories with owner-only permissions. This is same-user local IPC, not a remotely exposed service.
 
-## Updated simulator screenshots
+## Native simulator capture and screenshot refresh
+
+For the built-in workflow, save a recipe using **Add Frames → Image / PDF → Capture from Simulator…**, or **Simulator capture settings** on an existing image. Web Frames supports iOS and Android, action recording, optional local build/install, test-state preparation and selected-frame live preview. See the [Simulator Capture guide](../docs/simulator-capture.md).
+
+For agents, enable **Allow agents to capture simulator screens**. `capture_simulator_frame` runs the saved recipe; `capture_simulator_frames` accepts 1–20 unique frame ids and can mix platforms. Inspect every result: a completed batch can contain failed screens. Agents cannot supply a new recipe, build command or test state. Local build permission is separate. Direct native UI capture does not require the MCP permission.
+
+### External screenshot files (optional)
 
 Enable **Settings → Claude · MCP → Allow agents to update frame images** and keep the Web Frames project open. This is separate from permission to resolve comments; both are off by default.
 
@@ -97,7 +105,7 @@ The frame keeps its id, label, position, size, comments and links. Other frames 
 
 Use **Edit screen flow…** in an image frame’s floating toolbar to save optional `flow` and `deeplink` fields. `flow` accepts inline runner YAML or a file path relative to the source project (or an absolute path). The editor saves recipe text without executing it and supports Undo/Redo. Both fields survive image replacement and document reopening, and are returned by `list_frames` and `get_frame`; `get_agent_brief` explains the refresh sequence. Keep credentials out of shared recipes.
 
-For tapflow, the external agent reads the recipe, builds/installs as needed, calls `run_flow`, captures with `screenshot`, and passes the resulting absolute PNG/JPEG path to `update_frame_image`. A failed flow or capture must leave the existing frame image in place. A deeplink is an optional navigation hint for the agent’s runner; Web Frames does not open it automatically. URL credentials and token-like query parameters are removed from deeplinks returned by MCP, as for frame URLs.
+For an optional external runner such as tapflow, the agent reads the legacy recipe, builds/installs as needed, calls `run_flow`, captures with `screenshot`, and passes the resulting absolute PNG/JPEG path to `update_frame_image`. A failed flow or capture must leave the existing frame image in place. A legacy `flow`/`deeplink` is a navigation hint for that external runner; Web Frames does not execute legacy YAML. Native `simulatorCapture` recipes have their own supported deeplink handling. URL credentials and token-like query parameters are removed from deeplinks returned by MCP, as for frame URLs.
 
 ### Collect variants and choose a reference
 
@@ -114,35 +122,37 @@ is retained for Undo, but its status becomes `unavailable`; agents must ask for 
 reference instead of selecting another. `get_agent_brief` includes the pools and
 the unify recipe, including verification and reporting remaining differences.
 
-The built-in Fix connector does not run builds or control simulators. Sequential batch refresh using one emulator and optional streaming of the selected frame are planned.
+The built-in Fix connector does not run builds or control simulators. Native capture, batches, build/install, test states and selected-frame live preview are available through the app’s separate simulator workflow. Swift/Kotlin source edits use an external coding agent’s own source tools and review.
 
 ## Start
 
-Requirements: Apple Silicon, macOS 15 or later, a signed-in Codex installation with GPT-6 Astra access, and Web Frames. Node and local helpers are bundled. The previous live smoke test used Codex 0.154.0-alpha.6.2; compatibility with other Codex CLI versions needs verification.
+Requirements: Apple Silicon, macOS 15 or later, Web Frames and a signed-in Codex or Claude Code installation. The selected model must be available to your account. Use the model field to choose one; leaving it empty uses Web Frames’ Codex default or Claude Code’s default. Node and local helpers are bundled.
 
 1. Install Web Frames in Applications and open or create a project.
-2. In Settings, click **Connect Codex**. Web Frames starts its private local connector automatically; no terminal or connection-file picker is needed. If Codex is installed somewhere unusual, developers can set `WEBFRAMES_CODEX_BINARY` to its executable path.
-3. **Open sample project** builds an isolated Northstar dashboard, freezes a correct reference, then introduces three CSS defects.
+2. In **Settings → Coding agent**, choose Codex or Claude Code and click its **Connect** button. Web Frames starts its private local connector automatically; no connection-file picker is needed. Unusual CLI locations can be supplied through `WEBFRAMES_CODEX_BINARY` or `WEBFRAMES_CLAUDE_BINARY`.
+3. In **Comparison settings**, use **Sample project → Open**. This builds an isolated Northstar dashboard, freezes a correct reference, then introduces three CSS defects.
 4. Select two frames with Shift-click. The canvas shows **Compare**, the reference and implementation labels, and **Swap reference**. Compare sends screenshots, DOM and the selected source snapshot through Codex; findings become comments pinned to the implementation. Click a pin to read it.
-5. **Review fix…** opens a sheet with the exact diff. **Apply reviewed fix** writes one CSS file, reloads the frame, captures a fresh image, and asks Astra to verify every finding. Independent fixture checks also cover overflow, card width, heading size, button color, and a button click.
+5. **Review fix…** opens a sheet with the exact diff. **Apply reviewed fix** writes one CSS file, reloads the frame, captures a fresh image, and asks the chosen coding agent to verify every finding. Independent fixture checks also cover overflow, card width, heading size, button color, and a button click.
 6. **Undo fix** restores the exact source if nobody edited it after Apply. **Discard proposal** makes no source changes.
 
-For another local page, choose its source folder in **Setup…** and select two loaded frames of identical logical dimensions. Start that project's dev server from its sidebar menu, or use an already running server. Production URLs do not grant access to production source or deployment.
+For another local page, choose **Source folder → Choose…** in **Comparison settings** and select two loaded frames of identical logical dimensions. Start that project's dev server from its sidebar menu, or use an already running server. Production URLs do not grant access to production source or deployment.
 
 ## Boundaries
 
+These source-write controls apply to the built-in Compare/Fix connector. Independently running coding agents retain their own tools and permissions; the Comments MCP server itself never edits source.
+
 - Codex receives a bounded snapshot, not the original source folder. MCP offers only `search_code` and `read_code`. Shell, hooks, web search and multi-agent tools are disabled; filesystem sandbox is read-only. Only the native Apply button can write the actual source.
 - A visual Compare proposal can modify one existing CSS file, at most eight exact replacements. A Fix with Codex proposal can modify existing HTML, CSS, JS/JSX, TS/TSX or JSON files within the limits above; edits to `package.json`, `*.config.*`, PostCSS and tsconfig files are flagged in review and need a second confirmation before Apply. Files whose names look like credentials (`*credentials*`, `*service-account*`, `*private-key*`…) and hidden files are never read or sent; the review lists every file that was sent. Frame URLs sent to Codex have user info and token-like query parameters removed. Hashes reject stale edits; symlinks, hidden paths, traversal and generated directories are excluded.
-- Source snapshot: up to 200 files, 128 KB per file, 512 KB total. Supported reads: HTML/CSS/JS/JSX/TS/TSX. Select a small relevant source folder. Excluded filenames alone are not a secret detector: review the selected source before sending it.
+- Source snapshot: up to 200 files, 128 KB per file. Compare has a 512 KB total budget and reads HTML/CSS/JS/JSX/TS/TSX; comment Fix has a 2 MB total budget and also reads JSON. Select a small relevant source folder. Excluded filenames alone are not a secret detector: review the selected source before sending it.
 - Local connector binds only to 127.0.0.1, requires a random pairing token, rejects browser Origin headers and runs one job at a time. Never share `connection.json` or commit `.codex-bridge/`.
-- Pairing is stored in Keychain. A previously connected app-owned connector is restarted automatically with fresh credentials on launch. Disconnect stops it and removes saved pairing. Source folder selection and Undo state are session-only. After restarting Web Frames, open a fresh sample; old localhost frame URLs will no longer serve.
+- Pairing is stored in Keychain. A previously connected app-owned connector is restarted automatically with fresh credentials on launch. Disconnect stops it and removes saved pairing. Temporary comparison source selection and source-Apply Undo are session-only; this does not describe saved native capture recipes or persisted image-update Undo. After restarting Web Frames, open a fresh sample; old localhost frame URLs will no longer serve.
 - Cancellation after writing leaves an applied, unverified change and keeps Undo available. No silent model substitution, auto-deploy, or background source writes.
 
 ## Evidence and recovery
 
-**Setup… → Run evidence…** opens the local run directory containing reference/before/after images and DOM, the proposal, reviewed patch, original and changed CSS, approval receipt, verification, and event timestamps. Artifacts are under `~/Library/Application Support/Web Frames/AstraRuns` with owner-only permissions. Web Frames keeps the 20 most recent runs and nothing older than 30 days; **Settings → Local evidence → Clear Evidence** removes them all. The connector deletes each job's working folder (source snapshot, screenshots) as soon as the job ends.
+**Comparison settings → Run evidence → Show in Finder** opens the local run directory containing reference/before/after images and DOM, the proposal, reviewed patch, original and changed CSS, approval receipt, verification, and event timestamps. Artifacts are under `~/Library/Application Support/Web Frames/AstraRuns` with owner-only permissions. Web Frames keeps the 20 most recent runs and nothing older than 30 days; **Settings → Local evidence → Clear Evidence** removes them all. The connector deletes each job's working folder (source snapshot, screenshots) as soon as the job ends.
 
-If the app quits after Apply, recover manually from that run's `before.css`; compare current content with `after.css` before restoring to avoid overwriting subsequent edits. Automatic recovery across restarts is not implemented.
+If the app quits after Apply, Compare runs retain `before.css`/`after.css`. Comment Fix runs retain indexed `comment-fix-<index>-before.txt`/`after.txt` files and a `comment-fix-approval.json` path/hash mapping. Compare current content with the recorded after version before restoring anything, so newer edits are not overwritten. Automatic recovery across restarts is not implemented.
 
 A saved successful run can be shown as **Recorded run** if account limits or network access prevent a live demo. Never present replay as live execution.
 

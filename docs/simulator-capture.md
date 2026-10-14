@@ -1,4 +1,6 @@
-# Simulator Capture (1.1.8)
+# Simulator Capture
+
+Available since 1.1.8; instructions checked against Web Frames 1.1.9.
 
 Web Frames captures iOS Simulator and Android Emulator screens locally, using
 its own bundled XCTest / Android UiAutomation runners. No tapflow, server,
@@ -8,7 +10,7 @@ token or additional account is required.
    Android Studio with SDK Platform Tools, Emulator, Build Tools, an SDK platform
    and an AVD system image. Android Studio includes the required JDK. Install
    your app on the simulator/emulator, or choose its source project as described below.
-2. To add a frame, open **Add Frames → Image → Capture from Simulator…**.
+2. To add a frame, open **Add Frames → Image / PDF → Capture from Simulator…**.
    To update an existing image, select it and choose **Simulator capture settings**
    (the iPhone icon in its toolbar).
 3. Choose **iOS Simulator** or **Android Emulator**, then a device. **Start Simulator** starts a stopped device inside Web Frames.

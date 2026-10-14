@@ -1,21 +1,28 @@
 # Web Frames
 
-A native macOS workspace for web projects and AI coding agents. Put live
-pages, localhost routes and components on an infinite canvas, pin comments
-with DOM context, and hand them to Codex or Claude Code for fixes you review
-before anything is written.
+A native macOS workspace for reviewing web and mobile interfaces with AI coding
+agents. Keep live pages, component previews, simulator captures and PDF references
+on one canvas, then pin precise feedback. Built-in web source fixes go through
+review and Apply; external coding agents use their own source tools and review.
 
 Download the signed build at [webframes.pro](https://www.webframes.pro).
 Current release: **1.1.9 (14)**, Developer ID signed and Apple notarized,
 including PDF page import and the complete native iOS and Android simulator workflow.
-See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes.
+Already installed? Choose **Web Frames → Check for Updates…** in the Mac menu bar.
+See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes, or browse
+the [guides and use cases](https://www.webframes.pro/guides).
+
+![Web Frames 1.1.9 showing live Northstar demo pages, a design reference and review sections.](https://www.webframes.pro/screenshots/workspace-v2.webp)
+
+*Captured in Web Frames 1.1.9 using the Northstar demo.*
 
 ## What you can do
 
 - Inspect live web pages, localhost routes and component previews on one canvas.
 - Import selected PDF pages as image frames, annotate them and compare references.
-- Pin comments to elements or screenshot regions, then review an agent's patch
-  before Apply. Undo restores the previous source.
+- Pin comments to elements or screenshot regions. For supported web source,
+  review the built-in Fix proposal before Apply. Undo restores the source only
+  while it has not been edited again.
 - Collect variants in a section, choose the reference yourself and give the
   section a task for your coding agent.
 - Connect a local MCP client with the setup wizard. Comment status and screenshot
@@ -52,7 +59,8 @@ See the [Simulator Capture guide](docs/simulator-capture.md) for setup and agent
 Choose **Add Frames → Image / PDF** and select a PDF, or drop/copy-paste a PDF
 file onto the canvas. Leave the page range empty for all pages, or enter a range
 such as `1-3, 7`. Up to 50 PDF pages can be imported together from files up to
-100 MB each. Each page becomes a static image frame with the filename and page
+100 MB each, with up to 64 MB of rendered image data per batch and a maximum
+long edge of 2048 pixels. Each page becomes a static image frame with the filename and page
 number, ready for comments, Compare and your agent. The images are stored in
 the board; the original PDF is not needed after import and does not update the
 frames automatically. The whole batch supports Undo/Redo. Locked PDFs need an
@@ -60,14 +68,36 @@ unlocked copy saved from Preview first.
 
 Available in Web Frames 1.1.9.
 
+## Compare and built-in Fix
+
+Compare needs two loaded frames with exactly the same logical width and height,
+a connected coding agent and an approved local web source folder. In 1.1.9 it
+creates findings and proposes changes to one existing CSS file for review.
+
+Fix from comments supports existing HTML, CSS, JavaScript, JSX, TypeScript, TSX
+and JSON files. Review the proposed patch before Apply; source hashes prevent
+Apply or Undo from overwriting newer edits. Build/configuration edits require
+an additional confirmation.
+
+Swift or Kotlin changes use your external coding agent's source tools and review
+workflow. Web Frames can supply the visual evidence, then build/install and
+refresh saved captures. For image-only research, use an MCP-connected agent to
+inspect the images and report its findings.
+
 ## Requirements
 
 - Apple Silicon Mac, macOS 15 or later
-- Xcode 27 to build from source
-- Python 3.12+ and npm for the bundled helpers (`Tools/prepare_runtime.py`
-  downloads the pinned Node runtime that ships inside the app)
 - Optional: a signed-in [Codex](https://github.com/openai/codex) or
   [Claude Code](https://claude.com/claude-code) CLI for Compare and Fix
+- For native capture: local Xcode/iOS runtime or Android SDK/JDK and an emulator
+- Component previews may need the project's own dependencies/providers; projects
+  with custom PostCSS configuration use an existing Node 22.12+ installation
+
+The signed download bundles Node and the local helpers. Installing Web Frames
+does not require Python, npm or Xcode; Xcode is needed for the optional iOS workflow.
+Building from source additionally needs Xcode 27, Python 3.12+ and network access.
+`Tools/prepare_runtime.py` downloads the pinned Node/npm runtime and locked helper
+packages. The test commands below use Node/npm in your development shell.
 
 ## Build and run
 
@@ -109,7 +139,9 @@ folder. See `webframes/DocumentPackage.swift`.
 
 Built-in Compare and Fix give the agent a bounded, read-only source snapshot;
 the Apply button writes the reviewed patch. External MCP clients can read board
-context and, with your explicit settings, change comment status or frame images.
+context and, with your explicit settings, change comment status, replace frame
+images or run saved native capture recipes. Local project builds have a separate
+permission. These controls do not govern an external agent’s own filesystem tools.
 The MCP server never writes your source files. See [SECURITY.md](SECURITY.md)
 to report a vulnerability.
 

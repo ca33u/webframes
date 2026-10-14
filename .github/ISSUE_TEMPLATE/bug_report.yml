@@ -11,7 +11,7 @@ body:
     attributes:
       label: Web Frames version and build
       description: Find these in About Web Frames. If built from source, include the commit.
-      placeholder: 1.1.6 (11)
+      placeholder: 1.1.9 (14)
     validations:
       required: true
   - type: input

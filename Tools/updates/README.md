@@ -79,11 +79,12 @@ Keep older ZIP URLs available. Exclude old_updates/ from deployment.
 - Check offline: show a network error without changing the installed app.
 - In an isolated test feed, tamper with an archive: installation must be rejected.
 
-Release 1.1.6 (11) had its downloaded ZIP signature, checksum and feed verified
-at publication. Local preflight can recheck cached archives and reject tampering;
-it does not establish current live availability or a real install/relaunch.
-The complete install/update/relaunch cycle and clean macOS 15 remain release
-acceptance checks. Official setup: https://sparkle-project.org/documentation/
+The full Sparkle upgrade/relaunch and macOS 15.7.7 runtime were verified for the
+notarized 1.1.7 release in an isolated VM. The 1.1.9 publication checks verified
+live downloads, feed/notes, archive signatures, checksums and Gatekeeper; they
+did not repeat the VM upgrade/relaunch. A signature or packaging smoke check
+alone does not establish the complete acceptance checklist above.
+Official setup: https://sparkle-project.org/documentation/
 
 ## Version and release notes
 
