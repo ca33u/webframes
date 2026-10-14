@@ -12,7 +12,7 @@ Already installed? Choose **Web Frames → Check for Updates…** in the Mac men
 See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes, or browse
 the [guides and use cases](https://www.webframes.pro/guides).
 
-![Web Frames 1.1.9 showing live Northstar demo pages, a design reference and review sections.](https://www.webframes.pro/screenshots/workspace-v2.webp)
+![Web Frames 1.1.9 showing live Northstar demo pages, a design reference and review sections.](docs/images/workspace-v2.png)
 
 *Captured in Web Frames 1.1.9 using the Northstar demo.*
 
