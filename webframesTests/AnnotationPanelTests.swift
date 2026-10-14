@@ -6,6 +6,11 @@ import Testing
 @Suite("Comments panel")
 struct AnnotationPanelTests {
 
+    private func preferences() throws -> (UserDefaults, String) {
+        let suite = "webframes-comment-filter-tests." + UUID().uuidString
+        return (try #require(UserDefaults(suiteName: suite)), suite)
+    }
+
     private func find<T: NSView>(_ type: T.Type, in view: NSView, where match: (T) -> Bool = { _ in true }) -> T? {
         if let v = view as? T, match(v) { return v }
         for sub in view.subviews { if let v = find(type, in: sub, where: match) { return v } }
@@ -19,7 +24,9 @@ struct AnnotationPanelTests {
     }
 
     @Test func listsCommentsInATableAndCountsOpenOnesOnFix() throws {
-        let panel = AnnotationPanel()
+        let (defaults, suite) = try preferences()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let panel = AnnotationPanel(preferences: defaults)
         panel.frame = NSRect(x: 0, y: 0, width: 320, height: 640)
         panel.setAnnotations([
             info("a1", 1, comment: "Short"),
@@ -41,7 +48,9 @@ struct AnnotationPanelTests {
     }
 
     @Test func resolvedRowsAreMutedAndReopeningRestoresNormalAppearance() throws {
-        let panel = AnnotationPanel()
+        let (defaults, suite) = try preferences()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let panel = AnnotationPanel(preferences: defaults)
         panel.setAnnotations([info("done", 1, comment: "Done", resolved: true), info("open", 2, comment: "Still open")])
         let table = try #require(find(NSTableView.self, in: panel))
         let done = try #require(panel.tableView(table, viewFor: nil, row: 0))
@@ -58,8 +67,9 @@ struct AnnotationPanelTests {
 
     @Test func filterButtonHidesRowsPinsAndAreasAndResolveUndoUpdatesBoth() throws {
         let doc = try PostLaunchWorkflowTests().document()
-        let controller = DocumentWindowController(document: doc)
-        defer { controller.close(); doc.updateChangeCount(.changeCleared); doc.close() }
+        let (defaults, suite) = try preferences()
+        let host = CanvasHost(document: doc, preferences: defaults)
+        defer { host.tearDown(); doc.updateChangeCount(.changeCleared); doc.close(); defaults.removePersistentDomain(forName: suite) }
         let undo = try #require(doc.undoManager)
         undo.groupsByEvent = false
         undo.disableUndoRegistration()
@@ -72,7 +82,6 @@ struct AnnotationPanelTests {
             doc.workspace.createAnnotation(ann)
         }
         undo.enableUndoRegistration()
-        let host = controller.canvasHost
         let panel = host.annotationPanel
         let table = try #require(find(NSTableView.self, in: panel))
         let toggle = try #require(find(NSButton.self, in: panel, where: { $0.accessibilityIdentifier() == "comments.hideResolved" }))
@@ -123,5 +132,78 @@ struct AnnotationPanelTests {
         var ann = PostLaunchWorkflowTests().annotation("resolved")
         ann.resolved = true
         #expect(PinModel.from(ann).resolved)
+    }
+
+    @Test func filterChoicePersistsOnDiskAndRestoresBothButtonStates() throws {
+        let (defaults, suite) = try preferences()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var panel = AnnotationPanel(preferences: defaults)
+        #expect(!panel.hidesResolved)
+        for hidden in [true, false] {
+            let toggle = try #require(find(NSButton.self, in: panel, where: { $0.accessibilityIdentifier() == "comments.hideResolved" }))
+            toggle.performClick(nil)
+            #expect(panel.hidesResolved == hidden)
+            // Flush only in the test so a separate process can verify the
+            // saved preference, independently of UserDefaults' memory cache.
+            #expect(defaults.synchronize())
+            let query = Process()
+            query.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            query.arguments = ["read", suite, AnnotationPanel.hidesResolvedPreferenceKey]
+            let output = Pipe()
+            query.standardOutput = output
+            query.standardError = Pipe()
+            try query.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            query.waitUntilExit()
+            #expect(query.terminationStatus == 0)
+            #expect(String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == (hidden ? "1" : "0"))
+
+            let freshDefaults = try #require(UserDefaults(suiteName: suite))
+            panel = AnnotationPanel(preferences: freshDefaults)
+            #expect(panel.hidesResolved == hidden)
+            let restoredToggle = try #require(find(NSButton.self, in: panel, where: { $0.accessibilityIdentifier() == "comments.hideResolved" }))
+            #expect(restoredToggle.state == (hidden ? .on : .off))
+            #expect(restoredToggle.accessibilityLabel() == (hidden ? "Show Resolved Comments" : "Hide Resolved Comments"))
+        }
+    }
+
+    @Test(arguments: [true, false])
+    func savedFilterAppliesToRestoredBoardWithoutClicking(hidden: Bool) throws {
+        let (defaults, suite) = try preferences()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        AnnotationPanel(preferences: defaults).setHidesResolved(hidden)
+        #expect(defaults.synchronize())
+
+        let source = try PostLaunchWorkflowTests().document()
+        let reopened = try PostLaunchWorkflowTests().document()
+        defer {
+            source.updateChangeCount(.changeCleared); source.close()
+            reopened.updateChangeCount(.changeCleared); reopened.close()
+        }
+        source.workspace.createFrame(FrameModel(id: "f", url: "about:blank", label: "Review", x: 100, y: 100,
+            w: 300, h: 400, num: 1, isImage: false, filePath: nil))
+        for (id, resolved, num) in [("open", false, 1), ("done", true, 2)] {
+            var ann = AnnotationModel(id: id, num: num, frameId: "f", xPct: CGFloat(num * 20), yPct: 20,
+                color: "blue", comment: id, resolved: resolved, edits: [:], frameUrl: nil, frameLabel: nil)
+            if resolved { ann.areaSizePct = CGSize(width: 20, height: 30) }
+            source.workspace.createAnnotation(ann)
+        }
+        let snapshot = source.workspace.serialize()
+        try reopened.read(from: JSONEncoder().encode(snapshot), ofType: WebFramesDocument.fileTypeIdentifier)
+        let freshDefaults = try #require(UserDefaults(suiteName: suite))
+        let host = CanvasHost(document: reopened, preferences: freshDefaults)
+        defer { host.tearDown() }
+        let table = try #require(find(NSTableView.self, in: host.annotationPanel))
+        let card = try #require(host.frameLayer.subviews.compactMap { $0 as? FrameCardView }.first)
+        let overlay = card.container.pinOverlay
+        let pins = overlay.subviews.compactMap { $0 as? PinDotView }
+        let areas = overlay.layer?.sublayers?.compactMap { $0 as? CAShapeLayer } ?? []
+        #expect(host.annotationPanel.hidesResolved == hidden)
+        #expect(table.numberOfRows == (hidden ? 1 : 2))
+        #expect(pins.count == (hidden ? 1 : 2))
+        #expect(areas.count == (hidden ? 0 : 1))
+        #expect(pins.contains { $0.accessibilityLabel() == "Comment 1" })
+        #expect(pins.contains { $0.accessibilityLabel() == "Resolved comment 2" } == !hidden)
+        #expect(reopened.workspace.serialize() == snapshot)
     }
 }

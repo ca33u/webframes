@@ -6,15 +6,15 @@ Debug builds deliberately do not start Sparkle or replace the app from Xcode.
 Sparkle asks the user whether to check automatically; installation is not forced.
 
 Production feed: https://www.webframes.pro/updates/appcast.xml
-The current release is 1.1.11 (build 16), dated 14 October 2026. The site contains
+The current release is 1.1.12 (build 17), dated 15 October 2026. The site contains
 the signed archive and appcast under public/updates, with revalidation for the feed.
 Preserve published versioned files and never replace this feed with an empty one.
 
-Version 1.1.11 adds a Comments header filter for resolved comments, including their canvas pins and area outlines. Visible resolved comments are muted; reopening restores their normal appearance.
+Version 1.1.12 remembers the resolved-comment filter across app restarts and restores the chosen visibility in the Comments list and canvas pins and area outlines when opening a board. Visible resolved comments remain muted.
 Its notarized installer, signed update ZIP and release notes are published on
-the website. The production feed retains builds 15, 14, 13, 12, 11 and 10; previous
+the website. The production feed retains builds 16, 15, 14, 13, 12, 11 and 10; previous
 versioned downloads remain available. Local evidence and immutable artifacts
-are in `release/1.1.11-16-notarized`.
+are in `release/1.1.12-17-notarized`.
 
 The Ed25519 private key stays in macOS Keychain under account
 `app.essazanov.webframes`. Only the public key belongs in Info.plist.

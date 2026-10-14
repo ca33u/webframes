@@ -1912,14 +1912,14 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         pinEditorModal?.updateScreenshot(image, forId: annId)
     }
 
-    init(document: WebFramesDocument) {
+    init(document: WebFramesDocument, preferences: UserDefaults = .standard) {
         self.document = document
         self.bridge = NativeBridge()
         self.canvasBackdrop = CanvasBackdropView(frame: .zero)
         self.frameLayer = FrameLayerView()
         self.linkLayer = LinkLayerView(frame: .zero)
         self.dock = DockView()
-        self.annotationPanel = AnnotationPanel()
+        self.annotationPanel = AnnotationPanel(preferences: preferences)
         // Brand-row ivars (logoView / logoLabel / logoStack) were removed
         // in Step 3 — the wordmark is now a window-level centerX-top stack
         // owned by `DocumentWindowController`, which reuses this file's
@@ -2227,11 +2227,6 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         // even when the sidebar loaded its rows before the host did.
         sidebar?.setSelectedFrameID(selectedFrameId)
 
-        // Pins → per-frame overlays. Seed the bucket map with every
-        // live frame id so frames with zero annotations get an explicit
-        // empty push — otherwise a delete-all-pins-in-one-frame
-        // wouldn't clear the overlay.
-        pushCommentPins()
         } // !viewportOnly
 
         // Phase 6e Step 7: frame card visual rects from the workspace.
@@ -2396,6 +2391,8 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
             )
         }
 
+        // Restored cards must exist before their filtered pins are pushed.
+        if !viewportOnly { pushCommentPins() }
         pushLinksFromWorkspace()
     }
 
@@ -3580,6 +3577,8 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
 
     private func pushCommentPins() {
         guard let workspace = document?.workspace else { return }
+        // Include empty buckets so resolving or deleting the last visible
+        // comment also removes its old pin from an existing frame.
         var byFrame = Dictionary(uniqueKeysWithValues: workspace.frames.map { ($0.id, [PinModel]()) })
         for ann in workspace.annotations where byFrame[ann.frameId] != nil && (!annotationPanel.hidesResolved || !ann.resolved) {
             byFrame[ann.frameId, default: []].append(PinModel.from(ann))

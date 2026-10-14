@@ -103,6 +103,9 @@ enum PinColor {
 /// text follows. Copy, Resolve and Delete are in the row's context menu.
 final class AnnotationPanel: NSVisualEffectView {
 
+    static let hidesResolvedPreferenceKey = "webframes.hideResolvedComments"
+    private let preferences: UserDefaults
+
     weak var delegate: AnnotationPanelDelegate?
 
     private(set) var isShowing = false
@@ -132,7 +135,13 @@ final class AnnotationPanel: NSVisualEffectView {
 
     // MARK: init
 
-    override init(frame frameRect: NSRect) {
+    override convenience init(frame frameRect: NSRect) {
+        self.init(frame: frameRect, preferences: .standard)
+    }
+
+    init(frame frameRect: NSRect = .zero, preferences: UserDefaults) {
+        self.preferences = preferences
+        self.hidesResolved = preferences.bool(forKey: Self.hidesResolvedPreferenceKey)
         super.init(frame: frameRect)
         providerObserver = NotificationCenter.default.addObserver(forName: AgentProvider.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateExportActions() }
@@ -146,6 +155,7 @@ final class AnnotationPanel: NSVisualEffectView {
         buildHeader()
         buildBody()
         buildFooter()
+        updateResolvedButton()
         renderList()
         alphaValue = 0
         isHidden = true
@@ -188,7 +198,6 @@ final class AnnotationPanel: NSVisualEffectView {
         resolvedButton.action = #selector(onResolvedVisibilityClicked)
         resolvedButton.setButtonType(.pushOnPushOff)
         resolvedButton.setAccessibilityIdentifier("comments.hideResolved")
-        resolvedButton.setAccessibilityValue(false)
         closeButton.target = self
         closeButton.action = #selector(onCloseClicked)
 
@@ -331,6 +340,14 @@ final class AnnotationPanel: NSVisualEffectView {
     func setHidesResolved(_ hidden: Bool) {
         guard hidesResolved != hidden else { return }
         hidesResolved = hidden
+        preferences.set(hidden, forKey: Self.hidesResolvedPreferenceKey)
+        updateResolvedButton()
+        renderList()
+        delegate?.annotationPanelDidChangeResolvedVisibility()
+    }
+
+    private func updateResolvedButton() {
+        let hidden = hidesResolved
         resolvedButton.image = NSImage(systemSymbolName: hidden ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle", accessibilityDescription: nil)
         resolvedButton.contentTintColor = hidden ? WFDesign.accent : .secondaryLabelColor
         resolvedButton.state = hidden ? .on : .off
@@ -338,8 +355,6 @@ final class AnnotationPanel: NSVisualEffectView {
         let label = hidden ? "Show Resolved Comments" : "Hide Resolved Comments"
         resolvedButton.toolTip = label
         resolvedButton.setAccessibilityLabel(label)
-        renderList()
-        delegate?.annotationPanelDidChangeResolvedVisibility()
     }
 
     func setVisible(_ visible: Bool, animated: Bool = true) {
