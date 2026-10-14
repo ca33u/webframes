@@ -4,6 +4,13 @@ User-facing changes, newest first. Sparkle release notes are generated from
 this file (see Tools/updates/README.md), so write entries for users, not for
 reviewers. Internal refactors and test-only changes do not belong here.
 
+## 1.1.10 (15) — 2026-10-14
+
+### Fixed
+- Drag links between frames and resize frames using their handles again.
+  Canvas selection no longer intercepts the floating frame controls.
+  Dragging on empty canvas still selects frames normally.
+
 ## 1.1.9 (14) — 2026-10-14
 
 ### Added

@@ -693,7 +693,7 @@ final class FrameCardView: NSView {
 final class CardChromeHostView: NSView {
     /// Unhandled events and keys from the controls go to their card (the
     /// view parent is the frame layer), as when they were card subviews.
-    weak var card: NSView?
+    weak var card: FrameCardView?
     override var nextResponder: NSResponder? {
         get { card ?? super.nextResponder }
         set { super.nextResponder = newValue }

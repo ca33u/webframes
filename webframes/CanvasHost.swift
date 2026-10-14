@@ -3233,28 +3233,30 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         return hit === dock || hit.isDescendant(of: dock)
     }
 
-/// True when the hit target at `point` lives inside a `FrameCardView`
-    /// — i.e. the pointer is over a frame's chrome / web content. Used by
+    /// True when the hit target at `point` belongs to a `FrameCardView`
+    /// or its sibling chrome host. Used by
     /// the window-level mouseDown monitor (Phase 6e Step 3) to decide
     /// whether an empty-canvas click should drop the frame selection.
     ///
-    /// Implemented by walking up the hit-target chain looking for a
-    /// `FrameCardView` ancestor, rather than asking the `FrameLayerView`
-    /// directly — FrameCardViews are actually hosted by `FrameLayerView`
-    /// so a descent-of-frameLayer check would flag the layer's empty
-    /// background as "on a frame", which is the opposite of what we want.
+    /// Resolve the actual hit, not the padded chrome rectangle: empty
+    /// space in that sibling must still allow marquee selection and pan.
     func isFrameCardRegion(_ point: NSPoint) -> Bool {
         return frameCardId(at: point) != nil
     }
 
-    /// Returns the id of the `FrameCardView` under `point` (host coords),
-    /// or nil if the pointer isn't over any card. Used by the deselect
+    /// Returns the id of the card owning the hit at `point` (host coords),
+    /// including floating controls outside its bounds. Used by the deselect
     /// monitor to promote body-clicks into frame selection so the user
     /// doesn't have to hit the header strip to focus a frame.
     func frameCardId(at point: NSPoint) -> String? {
         guard var hit = hitView(atHostPoint: point) else { return nil }
         while true {
             if let card = hit as? FrameCardView { return card.id }
+            // Floating controls are siblings of their card so they remain
+            // above overlapping frames. Their view ancestry reaches the
+            // frame layer, never the card; follow the explicit owner before
+            // a canvas monitor mistakes a handle press for empty canvas.
+            if let chrome = hit as? CardChromeHostView { return chrome.card?.id }
             guard let parent = hit.superview else { return nil }
             hit = parent
         }

@@ -6,7 +6,7 @@ on one canvas, then pin precise feedback. Built-in web source fixes go through
 review and Apply; external coding agents use their own source tools and review.
 
 Download the signed build at [webframes.pro](https://www.webframes.pro).
-Current release: **1.1.9 (14)**, Developer ID signed and Apple notarized,
+Current release: **1.1.10 (15)**, Developer ID signed and Apple notarized,
 including PDF page import and the complete native iOS and Android simulator workflow.
 Already installed? Choose **Web Frames → Check for Updates…** in the Mac menu bar.
 See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes, or browse

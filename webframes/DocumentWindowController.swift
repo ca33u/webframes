@@ -801,7 +801,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         return event.locationInWindow.y >= window.contentLayoutRect.maxY
     }
 
-    private func handleCanvasPanDrag(_ event: NSEvent) -> NSEvent? {
+    func handleCanvasPanDrag(_ event: NSEvent) -> NSEvent? {
         guard event.window === window, window?.attachedSheet == nil, projectMapController?.isPresented != true, componentCatalogue?.isPresented != true else { return event }
         // A drag that started on the toolbar never became a canvas gesture.
         if event.type == .leftMouseDown, isInWindowChrome(event) { return event }
