@@ -61,7 +61,14 @@ def main():
 
 1. Drag Web Frames into Applications.
 2. Open it and create a project, or open an existing .webframes document.
-3. Add a local web project, website or image with the + button.
+3. Add a local web project, website, image or PDF with the + button.
+
+For PDF pages: Add Frames > Image / PDF, then choose all pages or a range
+such as 1-3, 7. You can also drop or paste PDF files onto the canvas. Each
+page becomes a static image frame stored with the board; the original PDF
+is no longer needed. Import up to 50 pages per batch from PDFs up to 100 MB
+each. The whole batch supports Undo/Redo. For locked PDFs, save an unlocked
+copy from Preview first.
 
 Node and component-preview helpers are included. Your own web project may
 still need its normal dependencies and package manager to run its dev server.
@@ -79,7 +86,7 @@ To refresh screenshots through MCP, enable Allow agents to update frame images
 in Settings. Your coding agent captures the emulator and replaces the existing
 image frame; Undo restores its previous image.
 
-For native iOS/Android screenshots: Add Frames > Image > Capture from Simulator,
+For native iOS/Android screenshots: Add Frames > Image / PDF > Capture from Simulator,
 or select an image and open Simulator capture settings. Choose an app and save
 its screen actions. Record Actions creates scenarios through the native preview.
 Build and install before capture can rebuild an Xcode scheme or Gradle variant;

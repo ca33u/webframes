@@ -4,6 +4,16 @@ User-facing changes, newest first. Sparkle release notes are generated from
 this file (see Tools/updates/README.md), so write entries for users, not for
 reviewers. Internal refactors and test-only changes do not belong here.
 
+## 1.1.9 (14) — 2026-10-14
+
+### Added
+- Import PDF pages as individual image frames through Add Frames → Image / PDF,
+  or by dropping or pasting PDF files onto the canvas. Choose all pages or ranges
+  such as 1–3, 7. Page titles keep the filename and page number. The imported
+  images are saved with the board and work after the original PDF is moved or
+  deleted. A batch imports together with one Undo; cancelling keeps the board
+  unchanged. Supports rotated/cropped pages and visible PDF annotations.
+
 ## 1.1.8 (13) — 2026-10-13
 
 ### Added

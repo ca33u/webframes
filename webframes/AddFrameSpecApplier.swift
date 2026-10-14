@@ -124,8 +124,14 @@ enum AddFrameSpecApplier {
                                           options: .regularExpression)
                     .replacingOccurrences(of: "_", with: " ")
                     .replacingOccurrences(of: "-", with: " ")
-                let frameLabel = !userLabel.isEmpty ? userLabel :
-                                 (!nameFromFile.isEmpty ? nameFromFile : "screenshot")
+                var pdfOrigin: PDFPageOrigin?
+                if let pdf = item["pdfPage"], JSONSerialization.isValidJSONObject(pdf),
+                   let data = try? JSONSerialization.data(withJSONObject: pdf),
+                   let decoded = try? JSONDecoder().decode(PDFPageOrigin.self, from: data), decoded.isValid { pdfOrigin = decoded }
+                let itemLabel = pdfOrigin == nil ? "" : ((item["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+                let namedPage = pdfOrigin.map { "\(userLabel) · Page \($0.pageNumber)" } ?? userLabel
+                let frameLabel = !userLabel.isEmpty ? namedPage :
+                    (!itemLabel.isEmpty ? itemLabel : (!nameFromFile.isEmpty ? nameFromFile : "screenshot"))
                 let origin = dropOrigin(index: i, width: tw,
                                         existing: existingFrameCount,
                                         viewport: viewport)
@@ -137,6 +143,7 @@ enum AddFrameSpecApplier {
                     "natW":   .number(natW),
                     "natH":   .number(natH),
                 ]
+                if let pdfOrigin { extras["pdfPage"] = pdfOrigin.jsonValue }
                 if let recipe = item["simulatorCapture"], JSONSerialization.isValidJSONObject(recipe),
                    let data = try? JSONSerialization.data(withJSONObject: recipe),
                    let typed = try? JSONDecoder().decode(SimulatorCaptureRecipe.self, from: data),

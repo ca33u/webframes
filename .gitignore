@@ -17,6 +17,8 @@ __pycache__/
 *.pyc
 DerivedData/
 build/
+.playwright-cli/
+output/playwright/
 
 # Local agent settings with machine-specific paths
 .claude/settings.local.json

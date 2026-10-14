@@ -104,6 +104,8 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     /// parallel until Step C strips the JS round-trip.
     private var workspaceSubscription: WorkspaceStore.Subscription?
     private var webSourceMonitorTask: Task<Void, Never>?
+    private var pdfImportTask: Task<Void, Never>?
+    private var pdfImportID: UUID?
     private var monitoredWebSource: ProjectWebSource?
     private var webSourceStatus: FramesSidebar.SourceStatus = .checking
     private var lastWebSourceOnline: Bool?
@@ -3306,8 +3308,9 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
 
     func pasteImageFrames(from pasteboard: NSPasteboard) -> Bool {
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [
-            .urlReadingContentsConformToTypes: [UTType.image.identifier]
+            .urlReadingContentsConformToTypes: [UTType.image.identifier, UTType.pdf.identifier]
         ]) as? [URL], !urls.isEmpty {
+            if urls.contains(where: PDFPageImporter.isPDF) { return importPDFFiles(urls) }
             return spawnImageFrames(items: imageSpecItems(fromURLs: urls))
         }
 
@@ -3348,8 +3351,9 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         // verbatim so formats like webp/svg that NSImage's PNG round-trip
         // would lose info pass through intact.
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: [
-            .urlReadingContentsConformToTypes: [UTType.image.identifier]
+            .urlReadingContentsConformToTypes: [UTType.image.identifier, UTType.pdf.identifier]
         ]) as? [URL], !urls.isEmpty {
+            if urls.contains(where: PDFPageImporter.isPDF) { return importPDFFiles(urls, centeredAt: dropWorldPoint(sender)) }
             let images = imageSpecItems(fromURLs: urls)
             return spawnImageFrames(items: images, centeredAt: dropWorldPoint(sender))
         }
@@ -3361,6 +3365,19 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
             return spawnImageFrames(items: [item], centeredAt: dropWorldPoint(sender))
         }
         return false
+    }
+
+    @discardableResult
+    private func importPDFFiles(_ urls: [URL], centeredAt point: CGPoint? = nil) -> Bool {
+        guard pdfImportTask == nil, let window, document != nil else { return false }
+        let id = UUID(); pdfImportID = id
+        pdfImportTask = PDFImportUI.prepare(urls, window: window, imageItems: { [weak self] in self?.imageSpecItems(fromURLs: [$0]) ?? [] }) { [weak self, weak window] items in
+            guard let self, self.pdfImportID == id else { return }
+            self.pdfImportTask = nil; self.pdfImportID = nil
+            guard let window, self.window === window, window.isVisible else { return }
+            self.spawnImageFrames(items: items, centeredAt: point)
+        }
+        return true
     }
 
     /// Where the user let go, in world coordinates.
@@ -3380,7 +3397,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     /// land — matches AppKit's usual NSImageView behaviour.
     private func acceptsDraggedImages(_ pb: NSPasteboard) -> Bool {
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: [
-            .urlReadingContentsConformToTypes: [UTType.image.identifier]
+            .urlReadingContentsConformToTypes: [UTType.image.identifier, UTType.pdf.identifier]
         ]) as? [URL], !urls.isEmpty {
             return true
         }
@@ -3493,7 +3510,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
             workspace.createFrame(model)
             placed.append(model)
         }
-        undo?.setActionName(models.count > 1 ? "Import Images" : "Add Image")
+        undo?.setActionName(items.contains(where: { $0["pdfPage"] != nil }) ? "Import PDF Pages" : (models.count > 1 ? "Import Images" : "Add Image"))
         undo?.endUndoGrouping()
         setFrameSelection(models.map(\.id))
         if models.count > 1 { performDockZoomFit(fitting: placed) }

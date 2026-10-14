@@ -39,7 +39,7 @@ final class AddFrameModal: NSView {
     private let cardContent = NSView()
     private let titleLabel = NSTextField(labelWithString: "Add Frames")
     private let tabControl = NSSegmentedControl(
-        labels: ["Project", "Web Page", "GitHub", "Image"],
+        labels: ["Project", "Web Page", "GitHub", "Image / PDF"],
         trackingMode: .selectOne,
         target: nil,
         action: nil

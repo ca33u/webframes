@@ -68,8 +68,14 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
     private let previewWrap = NSView()
     private let labelField = NSTextField()
 
-    private struct Pending { let name: String; let image: NSImage; let dataURL: String; let natW: Int; let natH: Int; var recipe: SimulatorCaptureRecipe? = nil }
+    private struct Pending { let name: String; let image: NSImage; let dataURL: String; let natW: Int; let natH: Int; var recipe: SimulatorCaptureRecipe? = nil; var pdfPage: PDFPageOrigin? = nil }
     private var pending: [Pending] = []
+    private var pdfTask: Task<Void, Never>?
+    private var pdfImportID: UUID?
+    private var isImporting = false
+    private let importStatus = NSTextField(wrappingLabelWithString: "")
+    private let captureButton = NSButton(title: "Capture from Simulator…", target: nil, action: nil)
+    var canConfirm: Bool { !isImporting && !pending.isEmpty }
 
     private let onValidityChange: () -> Void
 
@@ -81,6 +87,16 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
     func pasteImage() -> Bool { dropView.handlePaste() }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil && isImporting { cancelPDFImport() }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    private func cancelPDFImport() {
+        pdfImportID = nil; pdfTask?.cancel(); pdfTask = nil; setImporting(false)
+    }
+
 
     private func build() {
         dropView.onFiles = { [weak self] urls in self?.addFilesFromURLs(urls) }
@@ -94,15 +110,27 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
         previewStack.translatesAutoresizingMaskIntoConstraints = false
         previewWrap.translatesAutoresizingMaskIntoConstraints = false
         previewWrap.isHidden = true
-        let previewLabel = makeFieldLabel("Selected images")
+        let previewLabel = makeFieldLabel("Selected images / PDF pages")
+        let previewScroll = NSScrollView()
+        previewScroll.drawsBackground = false; previewScroll.hasHorizontalScroller = true
+        previewScroll.autohidesScrollers = true; previewScroll.translatesAutoresizingMaskIntoConstraints = false
+        previewScroll.documentView = previewStack
+        NSLayoutConstraint.activate([
+            previewScroll.heightAnchor.constraint(equalToConstant: 64),
+            previewStack.leadingAnchor.constraint(equalTo: previewScroll.contentView.leadingAnchor),
+            previewStack.topAnchor.constraint(equalTo: previewScroll.contentView.topAnchor),
+            previewStack.heightAnchor.constraint(equalTo: previewScroll.contentView.heightAnchor),
+            previewStack.widthAnchor.constraint(greaterThanOrEqualTo: previewScroll.contentView.widthAnchor),
+        ])
         previewLabel.translatesAutoresizingMaskIntoConstraints = false
-        let previewVert = NSStackView(views: [previewLabel, previewStack])
+        let previewVert = NSStackView(views: [previewLabel, previewScroll])
         previewVert.orientation = .vertical
         previewVert.alignment = .leading
         previewVert.spacing = 4
         previewVert.translatesAutoresizingMaskIntoConstraints = false
         previewWrap.addSubview(previewVert)
         NSLayoutConstraint.activate([
+            previewScroll.widthAnchor.constraint(equalTo: previewWrap.widthAnchor),
             previewVert.topAnchor.constraint(equalTo: previewWrap.topAnchor),
             previewVert.bottomAnchor.constraint(equalTo: previewWrap.bottomAnchor),
             previewVert.leadingAnchor.constraint(equalTo: previewWrap.leadingAnchor),
@@ -113,8 +141,10 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
         labelField.font = .systemFont(ofSize: 13)
         labelField.translatesAutoresizingMaskIntoConstraints = false
 
-        let capture = NSButton(title: "Capture from Simulator…", target: self, action: #selector(captureSimulator))
-        let root = NSStackView(views: [capture, dropView, previewWrap, makeFieldLabel("Frame name (optional)"), labelField])
+        captureButton.target = self; captureButton.action = #selector(captureSimulator)
+        importStatus.font = .systemFont(ofSize: 11); importStatus.textColor = .secondaryLabelColor
+        importStatus.isHidden = true
+        let root = NSStackView(views: [captureButton, dropView, importStatus, previewWrap, makeFieldLabel("Frame name (optional)"), labelField])
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 10
@@ -140,7 +170,7 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.image, .png, .jpeg, .svg, .webP]
+        panel.allowedContentTypes = [.image, .png, .jpeg, .svg, .webP, .pdf]
         if let win = window {
             panel.beginSheetModal(for: win) { [weak self] resp in
                 guard resp == .OK, let self else { return }
@@ -163,21 +193,49 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
         })
     }
 
-    private func addFilesFromURLs(_ urls: [URL]) {
-        for url in urls {
-            guard let data = try? Data(contentsOf: url),
-                  let img = NSImage(data: data) else { continue }
-            let mime = Self.mime(for: url)
-            let stored = ImageOptimizer.optimize(data, mime: mime)
-            let dataURL = "data:\(stored?.mime ?? mime);base64,\((stored?.data ?? data).base64EncodedString())"
-            let rep = img.representations.first as? NSBitmapImageRep
-            let natW = rep?.pixelsWide ?? Int(img.size.width)
-            let natH = rep?.pixelsHigh ?? Int(img.size.height)
-            pending.append(Pending(name: url.deletingPathExtension().lastPathComponent,
-                                   image: img, dataURL: dataURL, natW: natW, natH: natH))
+    func addFilesFromURLs(_ urls: [URL]) {
+        guard !isImporting else { return }
+        guard urls.contains(where: PDFPageImporter.isPDF) else {
+            appendSpecItems(urls.flatMap { imageSpecItems($0) }); return
         }
-        rebuildPreviews()
-        onValidityChange()
+        guard let window else { return }
+        let id = UUID(); pdfImportID = id
+        setImporting(true)
+        pdfTask = PDFImportUI.prepare(urls, window: window, imageItems: { [weak self] in self?.imageSpecItems($0) ?? [] }) { [weak self] items in
+            guard let self, self.pdfImportID == id else { return }
+            self.pdfTask = nil; self.pdfImportID = nil; self.setImporting(false)
+            self.appendSpecItems(items)
+        }
+    }
+
+    private func setImporting(_ value: Bool) {
+        isImporting = value; dropView.isEnabled = !value; captureButton.isEnabled = !value
+        importStatus.stringValue = value ? "Preparing PDF pages…" : ""
+        importStatus.isHidden = !value; onValidityChange()
+    }
+
+    private func imageSpecItems(_ url: URL) -> [[String: Any]] {
+        guard let data = try? Data(contentsOf: url), let image = NSImage(data: data) else { return [] }
+        let mime = Self.mime(for: url), stored = ImageOptimizer.optimize(data, mime: Self.mime(for: url))
+        let rep = image.representations.first as? NSBitmapImageRep
+        return [["name": url.deletingPathExtension().lastPathComponent,
+                 "dataURL": "data:\(stored?.mime ?? mime);base64,\((stored?.data ?? data).base64EncodedString())",
+                 "natW": rep?.pixelsWide ?? Int(image.size.width), "natH": rep?.pixelsHigh ?? Int(image.size.height)]]
+    }
+
+    private func appendSpecItems(_ items: [[String: Any]]) {
+        for item in items {
+            guard let dataURL = item["dataURL"] as? String, let comma = dataURL.firstIndex(of: ","),
+                  let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])),
+                  let image = NSImage(data: data), let width = item["natW"] as? Int, let height = item["natH"] as? Int else { continue }
+            var origin: PDFPageOrigin?
+            if let pdf = item["pdfPage"], let encoded = try? JSONSerialization.data(withJSONObject: pdf) {
+                origin = try? JSONDecoder().decode(PDFPageOrigin.self, from: encoded)
+            }
+            pending.append(Pending(name: item["name"] as? String ?? "Image", image: image,
+                dataURL: dataURL, natW: width, natH: height, pdfPage: origin))
+        }
+        rebuildPreviews(); onValidityChange()
     }
 
     private func addImage(_ image: NSImage, name: String) {
@@ -229,6 +287,10 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
                 "natW":    $0.natW,
                 "natH":    $0.natH,
             ]
+            if let pdf = $0.pdfPage {
+                item["label"] = $0.name
+                item["pdfPage"] = ["fileName": pdf.fileName, "pageNumber": pdf.pageNumber, "pageCount": pdf.pageCount]
+            }
             if let recipe = $0.recipe, let data = try? JSONEncoder().encode(recipe),
                let object = try? JSONSerialization.jsonObject(with: data) { item["simulatorCapture"] = object }
             return item
@@ -239,6 +301,7 @@ final class ImageTabPanel: NSView, AddFrameTabPanel {
     }
 
     func reset() {
+        cancelPDFImport()
         pending.removeAll()
         rebuildPreviews()
         labelField.stringValue = ""
@@ -272,8 +335,8 @@ final class ImageDropView: NSView {
     var onClick: (() -> Void)?
     var onPaste: ((NSImage, String) -> Void)?
 
-    private let hint = DropZoneLabel(wrappingLabelWithString: "Drop images here or click to browse")
-    private let sub  = DropZoneLabel(wrappingLabelWithString: "PNG, JPG, WebP, SVG — or paste from clipboard")
+    private let hint = DropZoneLabel(wrappingLabelWithString: "Drop images or PDF files here, or click to browse")
+    private let sub  = DropZoneLabel(wrappingLabelWithString: "PNG, JPG, WebP, SVG, PDF — or paste from clipboard")
     private var highlighted = false { didSet { updateAppearance() } }
     private var hovered = false { didSet { updateAppearance() } }
     private var hoverTracking: NSTrackingArea?
@@ -320,7 +383,7 @@ final class ImageDropView: NSView {
         ])
 
         registerForDraggedTypes(folderMode ? [.fileURL] : [.fileURL, .tiff, .png])
-        toolTip = folderMode ? "Click to choose a project folder" : "Click to choose images"
+        toolTip = folderMode ? "Click to choose a project folder" : "Click to choose images or PDF pages"
         updateAppearance()
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -385,6 +448,10 @@ final class ImageDropView: NSView {
     func handlePaste() -> Bool {
         guard !folderMode, isEnabled else { return false }
         let pb = NSPasteboard.general
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           urls.contains(where: PDFPageImporter.isPDF) {
+            onFiles?(urls); return true
+        }
         if let types = pb.types, types.contains(.png) || types.contains(.tiff) {
             if let img = NSImage(pasteboard: pb) {
                 onPaste?(img, "pasted-image")
@@ -392,7 +459,7 @@ final class ImageDropView: NSView {
             }
         }
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
-            let images = urls.filter { NSImage(byReferencing: $0).isValid }
+            let images = urls.filter { PDFPageImporter.isPDF($0) || NSImage(byReferencing: $0).isValid }
             if !images.isEmpty { onFiles?(images); return true }
         }
         return false
@@ -417,7 +484,7 @@ final class ImageDropView: NSView {
             onFiles?([url]); return true
         }
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: [
-            .urlReadingContentsConformToTypes: [UTType.image.identifier]
+            .urlReadingContentsConformToTypes: [UTType.image.identifier, UTType.pdf.identifier]
         ]) as? [URL] {
             onFiles?(urls)
             return !urls.isEmpty

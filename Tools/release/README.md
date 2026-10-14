@@ -122,7 +122,7 @@ download location. Apple acceptance and stapling must happen before
 `prepare_update.py` signs a public update archive.
 
 The owner performs the short final check: install/open, reopen a saved project,
-check canvas shortcuts and pass Compare → Fix → review → Apply. Version 1.1.8
+check canvas shortcuts and pass Compare → Fix → review → Apply. Version 1.1.9 adds PDF page import with page selection, persistent image frames and one Undo/Redo. It also
 includes native iOS/Android capture, source build/install, recording, test states,
 batch refresh and selected-frame live preview. See the [Simulator Capture guide](../../docs/simulator-capture.md)
 for local SDK requirements. Packaging/check commands do not open the native UI.

@@ -6,13 +6,14 @@ with DOM context, and hand them to Codex or Claude Code for fixes you review
 before anything is written.
 
 Download the signed build at [webframes.pro](https://www.webframes.pro).
-Current public release: **1.1.8 (13)**, Developer ID signed and Apple notarized,
-including the complete native iOS and Android simulator workflow.
+Current release: **1.1.9 (14)**, Developer ID signed and Apple notarized,
+including PDF page import and the complete native iOS and Android simulator workflow.
 See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes.
 
 ## What you can do
 
 - Inspect live web pages, localhost routes and component previews on one canvas.
+- Import selected PDF pages as image frames, annotate them and compare references.
 - Pin comments to elements or screenshot regions, then review an agent's patch
   before Apply. Undo restores the previous source.
 - Collect variants in a section, choose the reference yourself and give the
@@ -31,7 +32,7 @@ See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes.
 Component previews depend on the project's providers and sample data. Server
 authentication and database access may need a mock or the project's live page.
 
-Native simulator capture is included in 1.1.8. In Add Frames → Image, choose **Capture
+Native simulator capture is included since 1.1.8. In Add Frames → Image / PDF, choose **Capture
 from Simulator…**, or select an image and use **Simulator capture settings**.
 Use **Refresh from simulator** to repeat its recipe. Choose iOS Simulator or
 Android Emulator in capture settings. Xcode/iOS runtime or Android SDK/JDK are
@@ -45,6 +46,19 @@ Enable **Build and install before capture** to rebuild an Xcode scheme or Gradle
 module/variant and update-install the app before recording or refreshing screens.
 Local build scripts require separate project permission; existing app data is kept.
 See the [Simulator Capture guide](docs/simulator-capture.md) for setup and agent permissions.
+
+## PDF page import
+
+Choose **Add Frames → Image / PDF** and select a PDF, or drop/copy-paste a PDF
+file onto the canvas. Leave the page range empty for all pages, or enter a range
+such as `1-3, 7`. Up to 50 PDF pages can be imported together from files up to
+100 MB each. Each page becomes a static image frame with the filename and page
+number, ready for comments, Compare and your agent. The images are stored in
+the board; the original PDF is not needed after import and does not update the
+frames automatically. The whole batch supports Undo/Redo. Locked PDFs need an
+unlocked copy saved from Preview first.
+
+Available in Web Frames 1.1.9.
 
 ## Requirements
 
