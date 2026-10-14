@@ -19,6 +19,7 @@ struct PinModel: Equatable {
     /// The pin sits on the area's top-left corner (`xPct`/`yPct`).
     var areaWPct: CGFloat = 0
     var areaHPct: CGFloat = 0
+    var resolved = false
 
     var hasArea: Bool { areaWPct > 0 && areaHPct > 0 }
 
@@ -42,7 +43,8 @@ struct PinModel: Equatable {
             initialScrollX: cg("initialScrollX"),
             initialScrollY: cg("initialScrollY"),
             areaWPct: cg("areaWPct"),
-            areaHPct: cg("areaHPct")
+            areaHPct: cg("areaHPct"),
+            resolved: dict["resolved"] as? Bool ?? false
         )
     }
 }
@@ -122,9 +124,9 @@ final class PinOverlayView: NSView {
             view.apply(pin)
             if pin.hasArea {
                 let area = areaLayers[pin.id] ?? makeAreaLayer(for: pin.id)
-                let color = PinDotView.color(for: pin.color)
-                area.strokeColor = color.withAlphaComponent(0.9).cgColor
-                area.fillColor = color.withAlphaComponent(0.08).cgColor
+                let color = pin.resolved ? NSColor.secondaryLabelColor : PinDotView.color(for: pin.color)
+                area.strokeColor = color.withAlphaComponent(pin.resolved ? 0.35 : 0.9).cgColor
+                area.fillColor = color.withAlphaComponent(pin.resolved ? 0.02 : 0.08).cgColor
             }
         }
         layoutPins()
@@ -252,8 +254,11 @@ final class PinDotView: NSView {
     func apply(_ pin: PinModel) {
         id = pin.id
         label.stringValue = "\(pin.num)"
-        layer?.backgroundColor = Self.color(for: pin.color).cgColor
-        setAccessibilityLabel("Comment \(pin.num)")
+        alphaValue = pin.resolved ? 0.6 : 1
+        layer?.backgroundColor = (pin.resolved ? NSColor.secondaryLabelColor : Self.color(for: pin.color)).cgColor
+        layer?.borderColor = NSColor.white.withAlphaComponent(pin.resolved ? 0.4 : 1).cgColor
+        layer?.shadowOpacity = pin.resolved ? 0 : 0.5
+        setAccessibilityLabel("\(pin.resolved ? "Resolved comment" : "Comment") \(pin.num)")
     }
 
     /// Matches the old CSS palette:

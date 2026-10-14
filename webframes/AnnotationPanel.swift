@@ -64,6 +64,7 @@ protocol AnnotationPanelDelegate: AnyObject {
     func annotationPanel(didRequestDelete id: String)
     func annotationPanel(didRequestCopy id: String)
     func annotationPanel(didToggleResolved id: String)
+    func annotationPanelDidChangeResolvedVisibility()
 }
 
 // MARK: - Pin colors
@@ -106,12 +107,15 @@ final class AnnotationPanel: NSVisualEffectView {
 
     private(set) var isShowing = false
     private var annotations: [AnnotationInfo] = []
+    private var visibleAnnotations: [AnnotationInfo] = []
+    private(set) var hidesResolved = false
     private var screenshotsEnabled = true
 
     private let header = NSView()
     private let titleLabel = NSTextField(labelWithString: "Comments")
     private let countLabel = NSTextField(labelWithString: "")
     private let moreButton = AnnotationPanel.iconButton("ellipsis.circle", "More")
+    private let resolvedButton = AnnotationPanel.iconButton("line.3.horizontal.decrease.circle", "Hide Resolved Comments")
     private let closeButton = AnnotationPanel.iconButton("sidebar.trailing", "Hide Comments")
     private let scroll = NSScrollView()
     private let table = NSTableView()
@@ -180,6 +184,11 @@ final class AnnotationPanel: NSVisualEffectView {
 
         moreButton.target = self
         moreButton.action = #selector(onMoreClicked(_:))
+        resolvedButton.target = self
+        resolvedButton.action = #selector(onResolvedVisibilityClicked)
+        resolvedButton.setButtonType(.pushOnPushOff)
+        resolvedButton.setAccessibilityIdentifier("comments.hideResolved")
+        resolvedButton.setAccessibilityValue(false)
         closeButton.target = self
         closeButton.action = #selector(onCloseClicked)
 
@@ -187,7 +196,7 @@ final class AnnotationPanel: NSVisualEffectView {
         divider.boxType = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
 
-        [titleLabel, countLabel, moreButton, closeButton, divider].forEach(header.addSubview)
+        [titleLabel, countLabel, resolvedButton, moreButton, closeButton, divider].forEach(header.addSubview)
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: topAnchor),
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -203,7 +212,9 @@ final class AnnotationPanel: NSVisualEffectView {
             closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             moreButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
             moreButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: moreButton.leadingAnchor, constant: -8),
+            resolvedButton.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor, constant: -2),
+            resolvedButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: resolvedButton.leadingAnchor, constant: -8),
 
             divider.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: header.trailingAnchor),
@@ -313,9 +324,22 @@ final class AnnotationPanel: NSVisualEffectView {
 
     func setAnnotations(_ list: [AnnotationInfo]) {
         annotations = list
-        countLabel.stringValue = list.isEmpty ? "" : String(list.count)
         updateExportActions()
         renderList()
+    }
+
+    func setHidesResolved(_ hidden: Bool) {
+        guard hidesResolved != hidden else { return }
+        hidesResolved = hidden
+        resolvedButton.image = NSImage(systemSymbolName: hidden ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle", accessibilityDescription: nil)
+        resolvedButton.contentTintColor = hidden ? WFDesign.accent : .secondaryLabelColor
+        resolvedButton.state = hidden ? .on : .off
+        resolvedButton.setAccessibilityValue(hidden)
+        let label = hidden ? "Show Resolved Comments" : "Hide Resolved Comments"
+        resolvedButton.toolTip = label
+        resolvedButton.setAccessibilityLabel(label)
+        renderList()
+        delegate?.annotationPanelDidChangeResolvedVisibility()
     }
 
     func setVisible(_ visible: Bool, animated: Bool = true) {
@@ -379,17 +403,29 @@ final class AnnotationPanel: NSVisualEffectView {
         guard width > 0, abs(width - (measuredTextWidth ?? 0)) > 0.5 else { return }
         measuredTextWidth = width
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.annotations.isEmpty else { return }
-            self.table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<self.annotations.count))
+            guard let self, !self.visibleAnnotations.isEmpty else { return }
+            self.table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<self.visibleAnnotations.count))
         }
     }
 
     // MARK: List rendering
 
     private func renderList() {
-        emptyLabel.isHidden = !annotations.isEmpty
+        let selectedID = visibleAnnotations.indices.contains(table.selectedRow) ? visibleAnnotations[table.selectedRow].id : nil
+        visibleAnnotations = annotations.filter { !hidesResolved || !$0.resolved }
+        countLabel.stringValue = annotations.isEmpty ? "" : hidesResolved ? "\(visibleAnnotations.count) of \(annotations.count)" : String(annotations.count)
+        countLabel.setAccessibilityLabel(hidesResolved ? "\(visibleAnnotations.count) open comments, \(annotations.count) total" : "\(annotations.count) comments")
+        emptyLabel.stringValue = hidesResolved && !annotations.isEmpty ? "All comments resolved" : "No comments yet"
+        emptyLabel.isHidden = !visibleAnnotations.isEmpty
         table.reloadData()
+        if let selectedID, let row = visibleAnnotations.firstIndex(where: { $0.id == selectedID }) {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        } else {
+            table.deselectAll(nil)
+        }
     }
+
+    @objc private func onResolvedVisibilityClicked() { setHidesResolved(!hidesResolved) }
 
     fileprivate func toggleResolved(id: String) { delegate?.annotationPanel(didToggleResolved: id) }
 
@@ -397,8 +433,8 @@ final class AnnotationPanel: NSVisualEffectView {
 
     @objc private func onRowClicked() {
         let row = table.clickedRow
-        guard annotations.indices.contains(row) else { return }
-        delegate?.annotationPanel(didSelect: annotations[row].id)
+        guard visibleAnnotations.indices.contains(row) else { return }
+        delegate?.annotationPanel(didSelect: visibleAnnotations[row].id)
     }
 
     @objc private func onCloseClicked() {
@@ -457,8 +493,8 @@ final class AnnotationPanel: NSVisualEffectView {
     private func fillRowMenu(_ menu: NSMenu) {
         menu.removeAllItems()
         let row = table.clickedRow
-        guard annotations.indices.contains(row) else { return }
-        let ann = annotations[row]
+        guard visibleAnnotations.indices.contains(row) else { return }
+        let ann = visibleAnnotations[row]
         let copy = menu.addItem(withTitle: "Copy", action: #selector(onRowCopy(_:)), keyEquivalent: "")
         copy.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
         let resolve = menu.addItem(withTitle: ann.resolved ? "Reopen" : "Resolve", action: #selector(onRowResolve(_:)), keyEquivalent: "")
@@ -503,7 +539,7 @@ extension AnnotationPanel: NSMenuDelegate {
 }
 
 extension AnnotationPanel: NSTableViewDataSource, NSTableViewDelegate {
-    func numberOfRows(in tableView: NSTableView) -> Int { annotations.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { visibleAnnotations.count }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let id = NSUserInterfaceItemIdentifier("AnnotationCell")
@@ -512,7 +548,7 @@ extension AnnotationPanel: NSTableViewDataSource, NSTableViewDelegate {
             c.identifier = id
             return c
         }()
-        cell.configure(annotations[row], showScreenshot: screenshotsEnabled) { [weak self] id in
+        cell.configure(visibleAnnotations[row], showScreenshot: screenshotsEnabled) { [weak self] id in
             self?.toggleResolved(id: id)
         }
         cell.onTextWidth = { [weak self] width in self?.rowTextWidthChanged(width) }
@@ -522,7 +558,7 @@ extension AnnotationPanel: NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         let width = measuredTextWidth
             ?? max(120, (tableView.tableColumns.first?.width ?? tableView.bounds.width) - AnnotationCellView.horizontalInsets)
-        return AnnotationCellView.height(for: annotations[row], showScreenshot: screenshotsEnabled, textWidth: width)
+        return AnnotationCellView.height(for: visibleAnnotations[row], showScreenshot: screenshotsEnabled, textWidth: width)
     }
 }
 
@@ -620,6 +656,7 @@ private final class AnnotationCellView: NSTableCellView {
 
     func configure(_ a: AnnotationInfo, showScreenshot: Bool, onToggle: @escaping (String) -> Void) {
         annotationID = a.id
+        alphaValue = a.resolved ? 0.6 : 1
         self.onToggle = onToggle
         let color = PinColor.resolve(a.color)
         circle.image = NSImage(systemSymbolName: a.resolved ? "checkmark.circle.fill" : "circle",
@@ -644,7 +681,7 @@ private final class AnnotationCellView: NSTableCellView {
         metaLabel.attributedStringValue = meta
 
         commentLabel.attributedStringValue = Self.commentText(a)
-        setAccessibilityLabel("Comment \(a.num): \(a.comment)")
+        setAccessibilityLabel("\(a.resolved ? "Resolved comment" : "Comment") \(a.num): \(a.comment)")
 
         if showScreenshot, let image = a.screenshot {
             thumb.image = image

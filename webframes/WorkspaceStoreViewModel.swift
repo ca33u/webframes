@@ -156,7 +156,8 @@ extension PinModel {
             initialScrollX: num("initialScrollX"),
             initialScrollY: num("initialScrollY"),
             areaWPct: a.areaSizePct?.width ?? 0,
-            areaHPct: a.areaSizePct?.height ?? 0
+            areaHPct: a.areaSizePct?.height ?? 0,
+            resolved: a.resolved
         )
     }
 }

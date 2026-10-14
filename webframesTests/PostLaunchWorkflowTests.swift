@@ -131,7 +131,10 @@ import Testing
         // the inbox's save sees an external edit and blocks on a modal alert.
         doc.fileModificationDate = try fm.attributesOfItem(atPath: file.path)[.modificationDate] as? Date
         var permitted = true
-        let inbox = CommentsMCPInbox(document: doc, permission: { permitted })
+        // This test revokes the only enabled permission. Other opt-ins
+        // must not inherit the signed-in user's actual app preferences.
+        let inbox = CommentsMCPInbox(document: doc, permission: { permitted },
+                                     frameImagesPermission: { false }, simulatorPermission: { false })
         inbox.start()
         let directory = CommentsMCPInbox.directory(for: file)
         defer { inbox.stop(); doc.updateChangeCount(.changeCleared); doc.close(); try? fm.removeItem(at: directory); try? fm.removeItem(at: temp) }

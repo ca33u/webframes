@@ -6,7 +6,7 @@ on one canvas, then pin precise feedback. Built-in web source fixes go through
 review and Apply; external coding agents use their own source tools and review.
 
 Download the signed build at [webframes.pro](https://www.webframes.pro).
-Current release: **1.1.10 (15)**, Developer ID signed and Apple notarized,
+Current release: **1.1.11 (16)**, Developer ID signed and Apple notarized,
 including PDF page import and the complete native iOS and Android simulator workflow.
 Already installed? Choose **Web Frames → Check for Updates…** in the Mac menu bar.
 See the [changelog](CHANGELOG.md) for changes and MCP compatibility notes, or browse
@@ -15,6 +15,8 @@ the [guides and use cases](https://www.webframes.pro/guides).
 ![Web Frames 1.1.9 showing live Northstar demo pages, a design reference and review sections.](docs/images/workspace-v2.png)
 
 *Captured in Web Frames 1.1.9 using the Northstar demo.*
+
+Use the filter button in the **Comments** header to hide resolved comments and their canvas pins and area outlines. Resolved comments are muted when shown; reopening one restores its normal appearance.
 
 ## What you can do
 

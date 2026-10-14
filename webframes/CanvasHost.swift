@@ -2231,14 +2231,7 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
         // live frame id so frames with zero annotations get an explicit
         // empty push — otherwise a delete-all-pins-in-one-frame
         // wouldn't clear the overlay.
-        var byFrame: [String: [PinModel]] = [:]
-        for f in workspace.frames { byFrame[f.id] = [] }
-        for ann in workspace.annotations where byFrame[ann.frameId] != nil {
-            byFrame[ann.frameId, default: []].append(PinModel.from(ann))
-        }
-        for (frameId, pins) in byFrame {
-            bridge.setFramePins(frameId: frameId, pins: pins)
-        }
+        pushCommentPins()
         } // !viewportOnly
 
         // Phase 6e Step 7: frame card visual rects from the workspace.
@@ -3582,6 +3575,17 @@ final class CanvasHost: NSView, AddFrameModalDelegate,
     // `ann-panel-action` envelope is no longer forwarded from here. The
     // JS handler in `WFAnn` at index.html is now dead code and will be
     // deleted in Step 70e together with the canvas WKWebView.
+
+    func annotationPanelDidChangeResolvedVisibility() { pushCommentPins() }
+
+    private func pushCommentPins() {
+        guard let workspace = document?.workspace else { return }
+        var byFrame = Dictionary(uniqueKeysWithValues: workspace.frames.map { ($0.id, [PinModel]()) })
+        for ann in workspace.annotations where byFrame[ann.frameId] != nil && (!annotationPanel.hidesResolved || !ann.resolved) {
+            byFrame[ann.frameId, default: []].append(PinModel.from(ann))
+        }
+        for (frameId, pins) in byFrame { bridge.setFramePins(frameId: frameId, pins: pins) }
+    }
 
     func annotationPanelDidRequestClose() {
         // Phase 6e Step 70a: close is a pure UI action — hide the

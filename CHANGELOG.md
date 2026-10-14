@@ -4,6 +4,16 @@ User-facing changes, newest first. Sparkle release notes are generated from
 this file (see Tools/updates/README.md), so write entries for users, not for
 reviewers. Internal refactors and test-only changes do not belong here.
 
+## 1.1.11 (16) — 2026-10-14
+
+### Added
+- Hide resolved comments with the filter button in the Comments header.
+  The filter hides both list entries and their canvas pins and area outlines.
+
+### Changed
+- Resolved comments are muted when shown, including their list rows, pins
+  and area outlines. Reopening a comment restores its normal appearance.
+
 ## 1.1.10 (15) — 2026-10-14
 
 ### Fixed
